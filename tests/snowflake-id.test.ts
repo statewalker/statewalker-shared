@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { SNOWFLAKE_BASE32_LENGTH, SnowflakeId } from "../src/snowflake-id.js";
+import {
+  extractTime,
+  parseSnowflake,
+  parseSnowflakeBase32,
+  parseSnowflakeDec,
+  parseSnowflakeHex,
+  snowflakeToDecimal,
+  snowflakeToHex,
+} from "../src/snowflake-parse.js";
 
 describe("SnowflakeId.generate", () => {
   it("produces 13-character Crockford base32 strings", () => {
@@ -59,32 +68,31 @@ describe("SnowflakeId.generate", () => {
   });
 });
 
-describe("SnowflakeId.parseBase32", () => {
-  it("round-trips through generate and parseBase32", () => {
+describe("parseSnowflakeBase32", () => {
+  it("round-trips through generate and parse", () => {
     const time = 1700000000000;
     const gen = new SnowflakeId({ now: () => time, workerId: 7 });
     const id = gen.generate();
 
-    const parts = SnowflakeId.parseBase32(id);
+    const parts = parseSnowflakeBase32(id);
     expect(parts.timestamp).toBe(time - 1609459200000);
     expect(parts.workerId).toBe(7);
     expect(parts.sequence).toBe(0);
   });
 });
 
-describe("SnowflakeId.parse (auto-detect)", () => {
+describe("parseSnowflake (auto-detect)", () => {
   it("detects 13-char strings as Crockford base32", () => {
     const time = 1700000000000;
     const gen = new SnowflakeId({ now: () => time, workerId: 3 });
     const id = gen.generate();
 
     expect(id).toHaveLength(13);
-    const parts = SnowflakeId.parse(id);
+    const parts = parseSnowflake(id);
     expect(parts.workerId).toBe(3);
   });
 
   it("detects non-13-char strings as hex (legacy)", () => {
-    // Manually create a legacy hex ID (15 chars — typical for real timestamps)
     const timestamp = 90540800000n;
     const workerId = 1n;
     const sequence = 0n;
@@ -92,7 +100,7 @@ describe("SnowflakeId.parse (auto-detect)", () => {
     const hex = raw.toString(16);
 
     expect(hex.length).not.toBe(13);
-    const parts = SnowflakeId.parse(hex);
+    const parts = parseSnowflake(hex);
     expect(parts.timestamp).toBe(Number(timestamp));
     expect(parts.workerId).toBe(1);
   });
@@ -100,19 +108,36 @@ describe("SnowflakeId.parse (auto-detect)", () => {
   it("detects 16-char hex strings as hex", () => {
     const hex = "ffffffffffffffff";
     expect(hex).toHaveLength(16);
-    const parts = SnowflakeId.parse(hex);
+    const parts = parseSnowflake(hex);
     expect(parts.timestamp).toBeGreaterThan(0);
   });
 });
 
-describe("SnowflakeId.extractTime", () => {
+describe("parseSnowflakeHex / parseSnowflakeDec", () => {
+  it("parseSnowflakeHex extracts parts", () => {
+    const id = (3000n << 22n) | (42n << 12n) | 5n;
+    const parts = parseSnowflakeHex(id.toString(16));
+    expect(parts.timestamp).toBe(3000);
+    expect(parts.workerId).toBe(42);
+    expect(parts.sequence).toBe(5);
+  });
+
+  it("parseSnowflakeDec extracts parts", () => {
+    const id = (3000n << 22n) | (42n << 12n) | 5n;
+    const parts = parseSnowflakeDec(id.toString());
+    expect(parts.timestamp).toBe(3000);
+    expect(parts.workerId).toBe(42);
+    expect(parts.sequence).toBe(5);
+  });
+});
+
+describe("extractTime", () => {
   it("extracts absolute timestamp from Crockford base32 ID", () => {
     const time = 1700000000000;
     const gen = new SnowflakeId({ now: () => time });
     const id = gen.generate();
 
-    const extracted = SnowflakeId.extractTime(id);
-    expect(extracted).toBe(time);
+    expect(extractTime(id)).toBe(time);
   });
 
   it("extracts absolute timestamp from legacy hex ID", () => {
@@ -121,7 +146,17 @@ describe("SnowflakeId.extractTime", () => {
     const raw = (BigInt(offset) << 22n) | (1n << 12n) | 0n;
     const hex = raw.toString(16);
 
-    const extracted = SnowflakeId.extractTime(hex);
-    expect(extracted).toBe(time);
+    expect(extractTime(hex)).toBe(time);
+  });
+});
+
+describe("snowflakeToHex / snowflakeToDecimal", () => {
+  it("round-trips between hex and decimal", () => {
+    const id = (12345n << 22n) | (7n << 12n) | 99n;
+    const hex = id.toString(16);
+    const dec = id.toString();
+
+    expect(snowflakeToDecimal(hex)).toBe(dec);
+    expect(snowflakeToHex(dec)).toBe(hex);
   });
 });

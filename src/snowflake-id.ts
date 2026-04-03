@@ -1,13 +1,15 @@
 /**
- * SnowflakeId generator.
+ * SnowflakeId generator (stateful).
  * Based on https://github.com/dustinrouillard/snowflake-id (MIT License)
  * Modified to accept injectable clock for deterministic testing.
  * Returns Crockford base32 encoded IDs (13 chars, zero-padded, lexicographically sortable).
  *
+ * For parsing/conversion, see snowflake-parse.ts (stateless functions).
+ *
  * Browser-compatible: uses only BigInt and Date.now().
  */
 
-import { crockfordDecode, crockfordEncode } from "./crockford-base32.js";
+import { crockfordEncode } from "./crockford-base32.js";
 
 /** Length of a Crockford base32 encoded 64-bit snowflake ID. */
 export const SNOWFLAKE_BASE32_LENGTH = 13;
@@ -19,12 +21,6 @@ export interface SnowflakeOptions {
   workerId?: number;
   /** Function returning current timestamp in ms (default: Date.now) */
   now?: () => number;
-}
-
-export interface SnowflakeParts {
-  timestamp: number;
-  workerId: number;
-  sequence: number;
 }
 
 export class SnowflakeId {
@@ -64,68 +60,5 @@ export class SnowflakeId {
       BigInt(this.sequence);
 
     return crockfordEncode(id, SNOWFLAKE_BASE32_LENGTH);
-  }
-
-  /** Parse a Crockford base32 encoded snowflake ID into its component parts. */
-  static parseBase32(base32: string): SnowflakeParts {
-    const id = crockfordDecode(base32);
-    return {
-      timestamp: Number(id >> 22n),
-      workerId: Number((id >> 12n) & 0x3ffn),
-      sequence: Number(id & 0xfffn),
-    };
-  }
-
-  /** Parse a hex-encoded snowflake ID into its component parts (legacy format). */
-  static parseHex(hex: string): SnowflakeParts {
-    const id = BigInt(`0x${hex}`);
-    return {
-      timestamp: Number(id >> 22n),
-      workerId: Number((id >> 12n) & 0x3ffn),
-      sequence: Number(id & 0xfffn),
-    };
-  }
-
-  /** Parse a decimal snowflake ID into its component parts. */
-  static parseDec(decimal: string): SnowflakeParts {
-    const id = BigInt(decimal);
-    return {
-      timestamp: Number(id >> 22n),
-      workerId: Number((id >> 12n) & 0x3ffn),
-      sequence: Number(id & 0xfffn),
-    };
-  }
-
-  /**
-   * Auto-detect format and parse a snowflake ID.
-   * - 13 chars → Crockford base32 (new format)
-   * - Contains [a-f] or ≤16 chars → hex (legacy)
-   * - Longer → decimal
-   */
-  static parse(id: string): SnowflakeParts {
-    if (id.length === SNOWFLAKE_BASE32_LENGTH) {
-      return SnowflakeId.parseBase32(id);
-    }
-    const isHex = /[a-f]/i.test(id) || id.length <= 16;
-    return isHex ? SnowflakeId.parseHex(id) : SnowflakeId.parseDec(id);
-  }
-
-  /** Convert a decimal snowflake string to hex. */
-  static toHex(decimal: string): string {
-    return BigInt(decimal).toString(16);
-  }
-
-  /** Convert a hex snowflake string to decimal. */
-  static toDecimal(hex: string): string {
-    return BigInt(`0x${hex}`).toString();
-  }
-
-  /**
-   * Extract the absolute timestamp (ms since Unix epoch) from a snowflake ID.
-   * Auto-detects format. Uses the default epoch unless overridden.
-   */
-  static extractTime(id: string, epoch: number = 1609459200000): number {
-    const parts = SnowflakeId.parse(id);
-    return parts.timestamp + epoch;
   }
 }
