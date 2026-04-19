@@ -8,9 +8,7 @@ export interface Intent<P, R> {
   promise: Promise<R>;
 }
 
-export type IntentHandler<P = unknown, R = unknown> = (
-  intent: Intent<P, R>,
-) => boolean;
+export type IntentHandler<P = unknown, R = unknown> = (intent: Intent<P, R>) => boolean;
 
 export interface Intents {
   run<P, R>(key: string, payload: P): Promise<R>;

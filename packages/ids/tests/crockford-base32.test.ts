@@ -58,12 +58,8 @@ describe("crockfordDecode", () => {
   });
 
   it("throws on invalid characters", () => {
-    expect(() => crockfordDecode("U")).toThrow(
-      "Invalid Crockford base32 character",
-    );
-    expect(() => crockfordDecode("!")).toThrow(
-      "Invalid Crockford base32 character",
-    );
+    expect(() => crockfordDecode("U")).toThrow("Invalid Crockford base32 character");
+    expect(() => crockfordDecode("!")).toThrow("Invalid Crockford base32 character");
   });
 });
 
@@ -85,16 +81,7 @@ describe("round-trip", () => {
 
 describe("lexicographic ordering", () => {
   it("lexicographic order matches numeric order", () => {
-    const values = [
-      0n,
-      1n,
-      31n,
-      32n,
-      1000n,
-      100000n,
-      1n << 32n,
-      (1n << 64n) - 1n,
-    ];
+    const values = [0n, 1n, 31n, 32n, 1000n, 100000n, 1n << 32n, (1n << 64n) - 1n];
     const encoded = values.map((v) => crockfordEncode(v, 13));
     const sorted = [...encoded].sort();
     expect(sorted).toEqual(encoded);

@@ -49,10 +49,7 @@ export function createIntents(): Intents {
     return promise;
   }
 
-  function addHandler<P, R>(
-    key: string,
-    handler: IntentHandler<P, R>,
-  ): () => void {
+  function addHandler<P, R>(key: string, handler: IntentHandler<P, R>): () => void {
     let set = handlers.get(key);
     if (!set) {
       set = new Set();

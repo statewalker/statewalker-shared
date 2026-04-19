@@ -18,9 +18,7 @@ export async function sha1Uuid(content: string): Promise<string> {
 /**
  * Generate a SHA1 hash from raw bytes.
  */
-export async function sha1Bytes(
-  data: Uint8Array<ArrayBuffer>,
-): Promise<string> {
+export async function sha1Bytes(data: Uint8Array<ArrayBuffer>): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-1", data);
   const hashArray = new Uint8Array(hashBuffer);
   return hexFromBytes(hashArray);

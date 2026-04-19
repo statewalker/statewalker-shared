@@ -54,10 +54,7 @@ export class SnowflakeId {
     this.lastTimestamp = timestamp;
 
     // 42-bit timestamp | 10-bit worker ID | 12-bit sequence
-    const id =
-      (BigInt(timestamp) << 22n) |
-      (BigInt(this.workerId) << 12n) |
-      BigInt(this.sequence);
+    const id = (BigInt(timestamp) << 22n) | (BigInt(this.workerId) << 12n) | BigInt(this.sequence);
 
     return crockfordEncode(id, SNOWFLAKE_BASE32_LENGTH);
   }

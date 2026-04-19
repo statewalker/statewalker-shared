@@ -39,11 +39,7 @@ export function newConsoleLogger(
         if (Levels[logLevel] > Levels[level]) {
           return;
         }
-        console[method](
-          `[${String(rowCounter++).padStart(7, "0")}]${prefix}`,
-          ...args,
-          metadata,
-        );
+        console[method](`[${String(rowCounter++).padStart(7, "0")}]${prefix}`, ...args, metadata);
       };
     };
     const logger: Logger = {
@@ -74,10 +70,7 @@ export function getProcessId(context: Record<string, unknown>): string {
   return context[key] as string;
 }
 
-export const [getLogger, setLogger, removeLogger] = newAdapter<
-  Logger,
-  Record<string, unknown>
->(
+export const [getLogger, setLogger, removeLogger] = newAdapter<Logger, Record<string, unknown>>(
   "app.logger",
   (context) => {
     const logger = newConsoleLogger("warn").child({
