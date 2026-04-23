@@ -13,7 +13,7 @@ Foundation layer for the statewalker ecosystem — shared primitives, adapters, 
 | [`@statewalker/shared-baseclass`](packages/shared-baseclass) | Proxy-based observable `BaseClass`. |
 | [`@statewalker/shared-registry`](packages/shared-registry) | Lightweight service/model registry. |
 | [`@statewalker/shared-intents`](packages/shared-intents) | Declarative intent primitives for cross-layer dispatch. |
-| [`@statewalker/ids`](packages/ids) | Crockford base32, SHA1-UUID and related ID utilities. |
+| [`@statewalker/shared-ids`](packages/shared-ids) | Crockford base32, SHA1-UUID and related ID utilities. |
 
 ## Development
 

@@ -1,5 +1,5 @@
 {
-  "name": "@statewalker/ids",
+  "name": "@statewalker/shared-ids",
   "version": "0.1.0",
   "private": false,
   "type": "module",

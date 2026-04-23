@@ -1,17 +1,17 @@
-# @statewalker/ids
+# @statewalker/shared-ids
 
 Crockford base32, SHA1-UUID and related ID utilities for deterministic identifiers.
 
 ## Installation
 
 ```sh
-pnpm add @statewalker/ids
+pnpm add @statewalker/shared-ids
 ```
 
 ## Usage
 
 ```ts
-import { encodeCrockford, sha1Uuid } from "@statewalker/ids";
+import { encodeCrockford, sha1Uuid } from "@statewalker/shared-ids";
 
 const id = encodeCrockford(Buffer.from("hello"));
 const uuid = await sha1Uuid("my-namespace", "my-input");
