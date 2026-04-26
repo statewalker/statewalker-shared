@@ -11,6 +11,6 @@ export interface Intent<P, R> {
 export type IntentHandler<P = unknown, R = unknown> = (intent: Intent<P, R>) => boolean;
 
 export interface Intents {
-  run<P, R>(key: string, payload: P): Promise<R>;
+  run<P, R>(key: string, payload: P, defaultHandler?: IntentHandler<P, R>): Intent<P, R>;
   addHandler<P, R>(key: string, handler: IntentHandler<P, R>): () => void;
 }

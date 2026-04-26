@@ -3,7 +3,7 @@ import type { Intent, IntentHandler, Intents } from "./types.js";
 export function createIntents(): Intents {
   const handlers = new Map<string, Set<IntentHandler>>();
 
-  function run<P, R>(key: string, payload: P): Promise<R> {
+  function run<P, R>(key: string, payload: P, defaultHandler?: IntentHandler<P, R>): Intent<P, R> {
     let resolveFn!: (result: R) => void;
     let rejectFn!: (error: unknown) => void;
 
@@ -42,11 +42,11 @@ export function createIntents(): Intents {
     }
 
     if (!intent.handled) {
-      intent.settled = true;
-      rejectFn(new Error(`Unhandled intent: ${key}`));
+      defaultHandler?.(intent);
+      intent.handled = true;
     }
 
-    return promise;
+    return intent;
   }
 
   function addHandler<P, R>(key: string, handler: IntentHandler<P, R>): () => void {
