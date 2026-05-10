@@ -1,4 +1,3 @@
-export { KeyedSlot } from "./keyed-slot.js";
-export type { SlotObserve, SlotProvide } from "./new-slot.js";
-export { getSlotKey, newSlot, SLOT_KEY } from "./new-slot.js";
+export type { KeyedSlotDeclaration, SlotDeclaration } from "./define-slot.js";
+export { defineKeyedSlot, defineSlot } from "./define-slot.js";
 export { Slots } from "./types.js";
