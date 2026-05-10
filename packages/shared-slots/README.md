@@ -102,7 +102,7 @@ extensible).
 - `@statewalker/shared-intents` — the sibling RPC bus.
 - `@statewalker/shared-registry` — LIFO cleanup for
   `provide` / `observe` disposers.
-- `@statewalker/workspace-api` — the `Workspace` adapter host.
+- `@statewalker/workspace` — the `Workspace` adapter host.
 
 ## License
 
