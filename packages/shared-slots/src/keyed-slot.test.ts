@@ -91,6 +91,28 @@ describe("KeyedSlot", () => {
     expect(seen).toHaveLength(2);
   });
 
+  it("version bumps when ANOTHER KeyedSlot instance over the same key mutates", () => {
+    // Regression: the earlier implementation only bumped version on
+    // this instance's own register/release calls. A consumer-side
+    // wrapper (e.g. inside a React component reading useKeyedSlot)
+    // therefore never re-rendered when an init-side wrapper
+    // contributed an entry — chat-mini.app's deep-link overlay never
+    // mounted, intent never fired. version must reflect every change
+    // to the underlying slot's contributions for the configured key.
+    const slots = new Slots();
+    const reader = new KeyedSlot<Item>(slots, "x:items");
+    const writer = new KeyedSlot<Item>(slots, "x:items");
+
+    const v0 = reader.version;
+    writer.register("a", { label: "from-writer" });
+    expect(reader.version).toBeGreaterThan(v0);
+    expect(reader.get("a")?.label).toBe("from-writer");
+
+    const v1 = reader.version;
+    writer.register("b", { label: "second" });
+    expect(reader.version).toBeGreaterThan(v1);
+  });
+
   it("supports O(1) lookup over thousands of entries", () => {
     const slots = new Slots();
     const k = new KeyedSlot<Item>(slots, "x:items");

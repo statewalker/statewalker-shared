@@ -32,10 +32,15 @@ interface InternalEntry<T> {
  *  - **O(1) `get(id)`** — backed by a lazily-rebuilt `Map<id, T>` snapshot
  *    that tracks the underlying slot's frozen-array snapshot identity.
  *
- * `version` bumps monotonically on every successful `register` /
- * disposal-driven removal. Consumers — primarily React's
- * `useSyncExternalStore`, accessed through the `core-react` `useKeyedSlot`
- * hook — read it for change detection.
+ * `version` bumps monotonically on every change to the underlying slot's
+ * contributions for the configured key — not just contributions made
+ * through this instance. The wrapper subscribes to the underlying slot at
+ * construction time so version reflects external mutations too. This is
+ * load-bearing for `useKeyedSlot`: a consumer-side wrapper inside a
+ * React component must re-render when an init-side wrapper (a different
+ * `KeyedSlot` instance over the same key) registers a new entry, and
+ * `useSyncExternalStore` only re-renders if the snapshot getter
+ * (`wrapper.version`) returns a new value.
  */
 export class KeyedSlot<T> {
   private readonly _slots: Slots;
@@ -48,6 +53,13 @@ export class KeyedSlot<T> {
   constructor(slots: Slots, slotKey: string) {
     this._slots = slots;
     this._slotKey = slotKey;
+    // Live subscription so external mutations of the underlying slot
+    // bump `version` too. `Slots.observe` invokes the callback once
+    // synchronously on subscription with the current snapshot — that
+    // sets the initial version baseline.
+    this._slots.observe<KeyedRecord<T>>(this._slotKey, () => {
+      this._version += 1;
+    });
   }
 
   get version(): number {
@@ -77,7 +89,6 @@ export class KeyedSlot<T> {
     const record: KeyedRecord<T> = { id, value };
     const providerDisposer = this._slots.provide<KeyedRecord<T>>(this._slotKey, record);
     this._entries.set(id, { value, record, providerDisposer, refCount: 1 });
-    this._version += 1;
     return () => this._release(id);
   }
 
@@ -117,6 +128,5 @@ export class KeyedSlot<T> {
     if (entry.refCount > 0) return;
     entry.providerDisposer();
     this._entries.delete(id);
-    this._version += 1;
   }
 }
