@@ -108,6 +108,19 @@ export class KeyedSlot<T> {
   }
 
   /**
+   * Snapshot of every currently-registered `{id, value}` pair, as a
+   * fresh Map. O(n) in the entry count; intended for ad-hoc lookups
+   * (e.g. "find the panel matching this flag"). Use `observe` for
+   * change tracking.
+   */
+  entries(): ReadonlyMap<string, T> {
+    const map = new Map<string, T>();
+    const snap = this._slots.getSnapshot<KeyedRecord<T>>(this._slotKey);
+    for (const rec of snap) map.set(rec.id, rec.value);
+    return map;
+  }
+
+  /**
    * Subscribe to changes in the keyed slot. The callback is invoked
    * synchronously once with the current entries before `observe` returns,
    * then again on every subsequent change. Returns a disposer.
