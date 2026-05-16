@@ -1,113 +1,286 @@
 # @statewalker/shared-commands
 
-Typed command bus for cross-fragment late binding.
-
 ## What it is
 
-A workspace-scoped bus that lets fragments dispatch typed RPC requests
-without importing each other. One fragment **declares** a command via
-`defineCommand(key)`; another fragment **listens** for it; the
-declaring fragment (or a third party) **calls** it.
+Typed command bus **and** reactive command registry — one package providing
+both the dispatch substrate (bus, declarations, dispatch policies) and the
+catalog substrate (registries, composition primitives) used for cross-fragment
+late binding, AI-agent tool projection, and UI menu / action composition.
 
-Implements the GoF Command pattern with a richer lifecycle than VS
-Code-style commands: three-state (`pending → handled → settled`),
-multi-listener with first-claim-wins, and per-declaration default
-fallback.
+## Why it exists
 
-## Installation
+Late binding is a recurring need across the monorepo. Fragments shouldn't have
+to import each other to talk; UI menus shouldn't hard-code which fragment
+handles "save"; AI agents shouldn't know whether a file-read came from a local
+handler, an MCP server, or a remote gRPC service.
+
+**v1** scoped this to one workspace's fragments — a typed RPC bus with
+first-claim-wins listeners. Useful but narrow.
+
+**v2** extends the same substrate to be a universal:
+
+- **Tool surface for AI agents.** Each Command projects to a Vercel AI SDK
+  tool via one generic bridge (`ai-agent` owns the bridge; this package owns
+  everything upstream).
+- **Mount point for external APIs.** MCP servers, OpenAPI / gRPC / GraphQL
+  services are brought into the bus by adapter packages — every external
+  protocol's tools become Commands; consumers see no protocol-specific code.
+- **Action library for UI.** Menus, action bars, keyboard shortcuts pull from
+  a `CommandsRegistry`; the same `Command` declaration carries the schema
+  (for invocation) and the UX metadata (`label` / `icon` / i18n key).
+
+A single registry composition mechanism plus a single dispatch mechanism
+replace what would otherwise be one bridge per protocol times one ergonomic
+shim per consumer. Capability filtering, observation wrappers, and
+hierarchical delegation drop in as alternative `Commands` and
+`CommandsRegistry` factories without changing this contract.
+
+## How to use
+
+Install:
 
 ```sh
 pnpm add @statewalker/shared-commands
 ```
 
-## Usage
+Three primitives:
+
+1. **Declare** a command with `Command.required(key)` / `.async(key)` /
+   `.silent(key)` / `.custom(key, policy)`. Carries input/output schemas,
+   dispatch policy, and optional UX metadata.
+2. **Create** a bus (`Commands.create()`) and a registry
+   (`CommandsRegistry.create(...decls?)`).
+3. **Listen** for declared commands on the bus; **call** them to dispatch.
+
+The full DX is in [Examples](#examples). API surface at a glance:
+
+| Concept | Entry point |
+|---|---|
+| Build a declaration | `Command.required / .async / .silent / .custom` → `.input / .output / .label / .description / .icon / .build()` |
+| Create a bus | `Commands.create()` |
+| Dispatch | `commands.call(decl, payload).promise` |
+| Listen | `commands.listen(decl, fn, { priority? }) → dispose` |
+| Create a registry | `CommandsRegistry.create(...decls?)` → `.set(...) / .remove(...)` |
+| Derive a registry | `CommandsRegistry.compose / .filter / .namespace` |
+| Discriminate failures | `e instanceof CommandError && e.kind` |
+
+## Examples
 
 ### Declare a command
 
 ```ts
-import { defineCommand } from "@statewalker/shared-commands";
+import { Command } from "@statewalker/shared-commands";
+import { z } from "zod";
 
-export interface PickFilePayload { multiple?: boolean }
-export interface PickFileResult  { blobs: Blob[] }
-
-export const PickFileCommand =
-  defineCommand<PickFilePayload, PickFileResult>("platform:pick-file");
+export const PickFileCommand = Command.required("platform:pick-file")
+  .input(z.object({ multiple: z.boolean().optional() }))
+  .output(z.object({ blobs: z.array(z.instanceof(Blob)) }))
+  .label("Pick File")
+  .description("Open the file picker.")
+  .icon("folder-open")
+  .build();
 ```
 
-### Dispatch a command
+Policy is declared first; `.build()` is the explicit terminator. The chain
+runs through four phases:
+
+1. **Policy** — `Command.required(key)` / `Command.async(key)` / `Command.silent(key)` / `Command.custom(key, policy)`.
+2. **Input** — `.input(schema)` accepts any [Standard Schema](https://standardschema.dev/)–compliant
+   library (Zod, Valibot, ArkType, TypeBox, …). Types are inferred from the schema.
+3. **Output** — `.output(schema)`. Same.
+4. **Optional UX metadata** — `.label` / `.description` / `.icon`, any order.
+
+JSON Schema is derived from the Standard Schemas via
+[`@standard-community/standard-json`](https://github.com/standard-community/standard-json) —
+no schema-lib-specific helper packages, no Zod-as-contract.
+
+`.label` / `.description` are i18n fallbacks; the i18n layer overrides them via
+`command.{key}.label` / `command.{key}.description`.
+
+`Command.custom(key, policy)` for combinations beyond the three named presets:
+
+```ts
+const X = Command.custom("x", { onNoHandlers: "wait", onAllObserveOnly: "reject" })
+  .input(s).output(s).build();
+```
+
+The `Command` namespace value coexists with the `Command<P, R>` type used by the
+bus's `call()` return — TypeScript distinguishes them by position (type-side vs.
+value-side), like `Array` / `Promise` / `Set`.
+
+### Dispatch & listen
 
 ```ts
 import { Commands } from "@statewalker/shared-commands";
 
-const commands = workspace.requireAdapter(Commands);
-const cmd = commands.call(PickFileCommand, { multiple: true });
-const { blobs } = await cmd.promise;
+const commands = Commands.create();
+
+commands.listen(PickFileCommand, async (cmd) => {
+  const handles = await showOpenFilePicker({ multiple: cmd.payload.multiple });
+  return { blobs: await Promise.all(handles.map((h) => h.getFile())) };
+});
+
+const { blobs } = await commands.call(PickFileCommand, { multiple: true }).promise;
 ```
 
-### Listen for a command
+`Commands.create()` is the single factory for the reference implementation.
+Future alternative implementations (composites, hierarchical with parent
+delegation, observation wrappers, capability-filtered) are exposed as their own
+static factories on the `Commands` namespace (`Commands.composed(...)`,
+`Commands.filtered(parent, predicate)`, …) without changing the `Commands`
+interface or this consumer-side ergonomics.
+
+A listener returns one of:
+
+- `void` / `undefined` — observe only (does not claim).
+- `true` — claim, settle later via `cmd.resolve(...)` / `cmd.reject(...)` from
+  outside (button click, timer fires, …).
+- `Promise<R>` — claim and settle when the promise resolves.
+
+**Priority.** `commands.listen(decl, fn, { priority })` controls invocation
+order. Default `0`; higher fires earlier; ties unspecified. Negative
+priorities are the convention for default / fallback handlers:
 
 ```ts
-commands.listen(PickFileCommand, (cmd) => {
-  // Async work returning a Promise → claim + settle
-  return showOpenFilePicker({ multiple: cmd.payload.multiple })
-    .then(async (handles) => ({
-      blobs: await Promise.all(handles.map((h) => h.getFile())),
-    }));
+commands.listen(decl, fn);                          // default — priority 0
+commands.listen(decl, validator, { priority: 100 }); // early — short-circuit
+commands.listen(decl, fallback, { priority: -1 });   // late — fires after all others
+```
+
+**Validation** runs at the bus boundary: `payload` is validated against
+`inputSchema` before any listener sees the command (failure → call rejects,
+no listener invoked). Each `cmd.resolve(value)` is validated against
+`outputSchema` (failure → call rejects with `CommandError("output-validation")`,
+the offending listener is reported).
+
+### Registries
+
+```ts
+import { CommandsRegistry } from "@statewalker/shared-commands";
+
+// Build a mutable bundle — variadic seed + chainable .set / .remove
+const fileTools = CommandsRegistry.create(ReadFileCommand, WriteFileCommand)
+  .set(GrepFilesCommand, EditFileCommand)
+  .remove("fs:obsolete-tool");
+
+// Compose multiple sources into a single read-only view
+const allTools = CommandsRegistry.compose(fileTools, mcpRegistry, openApiRegistry);
+
+// Filter (capability gate, agent whitelist, …)
+const agentTools = CommandsRegistry.filter(allTools, (decl) => decl.key.startsWith("fs:"));
+
+// Namespace (mount external adapter at a stable prefix)
+const mcpFs = CommandsRegistry.namespace(mcpClient.registry, "mcp:filesystem:");
+
+// React to changes anywhere in the tree
+const unsub = allTools.onUpdate(() => {
+  // re-project tools for the AI model, re-render the menu, …
 });
 ```
 
-A listener may also:
-- Return `true` to claim without settling (caller settles later via
-  `cmd.resolve` / `cmd.reject` — useful for dialog-attached commands).
-- Return `void` / `undefined` to observe without claiming.
-- Call `cmd.resolve(value)` / `cmd.reject(err)` directly.
+Surface (all static on the `CommandsRegistry` namespace):
 
-## Dispatch lifecycle
+- **`CommandsRegistry.create(...decls?)`** — fresh `MutableCommandsRegistry`, optionally seeded.
+- **`CommandsRegistry.compose(...sources)`** — read-only union: `list()` concatenates, `get()` first-match wins, `onUpdate` fans out.
+- **`CommandsRegistry.filter(source, predicate)`** — predicate-filtered read-only view.
+- **`CommandsRegistry.namespace(source, prefix)`** — wraps each declaration's `key` with the prefix.
+- Plus methods on the instance: `list` / `get` / `onUpdate` (read), `set(...decls): this` / `remove(...keys): this` (mutable, variadic, chainable).
 
-For one `commands.call(decl, payload)`:
+The `CommandsRegistry` namespace value coexists with the `CommandsRegistry` interface type — same TypeScript trick as `Command` / `Command<P, R>` and `Commands`.
 
-1. Bus constructs a `Command<P, R>`.
-2. All registered listeners are invoked synchronously in registration
-   order with `(cmd)`.
-3. Per-listener claim detection: `true` / `Promise<R>` / direct
-   `cmd.resolve` / `cmd.reject` → claimed. `void` → observer.
-4. **All listeners are notified regardless of who claimed.**
-5. After listener pass, if no listener claimed, `decl.defaultFn` runs
-   (if set). May resolve, reject, throw, or leave pending.
-6. If no listener claimed and no `defaultFn`, the bus rejects with
-   `Unhandled command: <key>`.
+### Failure / edge path
 
-The settled-guard ensures only the first `resolve` / `reject` wins;
-later settles no-op.
-
-## Default fallback
+The bus rejects with a single `CommandError` class carrying a discriminated
+`kind` field. Callers can handle generically (`instanceof CommandError`) or
+switch on `kind`:
 
 ```ts
-// loud-fail (default): no listener + no default → reject "Unhandled command: <key>"
-const FooCommand = defineCommand<P, R>("foo");
+import { CommandError } from "@statewalker/shared-commands";
 
-// silent-pending opt-in: bus marks handled, leaves pending; caller settles externally
-const FooCommand = defineCommand<P, R>("foo", () => {});
-
-// resolve to a fallback value if nobody claimed
-const FooCommand = defineCommand<P, R>("foo", () => fallbackValue);
+try {
+  const { blobs } = await commands.call(PickFileCommand, { multiple: "yes" }).promise;
+} catch (e) {
+  if (e instanceof CommandError) {
+    switch (e.kind) {
+      case "input-validation":  break; // payload failed inputSchema
+      case "no-handlers":       break; // policy = required/async, zero listeners
+      case "not-claimed":       break; // policy = required, only observers
+      case "listener-threw":    break; // a handler threw or its promise rejected
+      case "output-validation": break; // a handler resolved with invalid shape
+    }
+  }
+}
 ```
 
-## API
+Pending-forever is **not** a `CommandError` — `silent` commands with no handlers
+intentionally never resolve. Callers either don't `await` them, or guard with
+`Promise.race` and a timeout.
 
-- `defineCommand<P, R>(key, defaultFn?)` — returns a frozen
-  `CommandDeclaration<P, R>`.
-- `commands.call(decl, payload)` — dispatches and returns a `Command<P, R>`.
-- `commands.listen(decl, fn)` — registers a listener; returns a disposer.
-- `Command<P, R>` — `{ key, payload, handled, settled, resolve, reject, promise }`.
+## Internals
 
-## Workspace scoping
+The bus stores listeners in a `Map<key, ListenerRecord[]>` where each record
+carries `{ fn, priority, seq }`. Dispatch snapshots the listener list, sorts
+by descending `priority` (ties resolved by `seq` — insertion order, but
+documented as unspecified), and iterates synchronously. The first listener
+that throws (or returns a rejecting promise) short-circuits the dispatch —
+remaining listeners do not run, and the bus rejects with
+`CommandError("listener-threw")` reporting the offending function.
 
-The `Commands` class is registered on the workspace as an adapter.
-**One workspace = one bus**: any listener registered by one fragment
-is observable by every other fragment in the same composition. Direct
-`new Commands()` is supported for tests only.
+Input validation runs first via Standard Schema's `~standard.validate`. If
+the validator returns a sync result, the listener pass runs synchronously
+after `commands.call(...)` returns. If the validator returns a Promise (some
+schemas use async refinements), the listener pass is deferred until the
+promise resolves — `commands.call(...)` still returns the `Command<P, R>`
+synchronously, but its `promise` settles later.
+
+Output validation runs on every `cmd.resolve(value)` — both
+listener-returned Promise resolves and explicit `cmd.resolve` calls from
+inside listeners. Settled-guard ensures only the first valid resolve wins.
+
+`CommandsRegistry.create(...)` holds a `Map<string, CommandDeclaration>` and
+a `Set<() => void>` of `onUpdate` subscribers. Variadic `.set(...)` is
+atomic: keys are pre-checked for collision (different reference under same
+key) before any entry is added; on collision a `RangeError` is thrown and
+the map is unchanged. Idempotent re-registration (same reference) is a
+no-op (no `onUpdate` fire). Composed / filtered / namespaced views hold no
+state — subscribers and lookups delegate to the underlying source(s).
+
+JSON Schema (`inputJsonSchema` / `outputJsonSchema`) is exposed as a lazy
+`Promise<Record<string, unknown>>` getter on each declaration. The first
+read triggers async vendor loading inside
+`@standard-community/standard-json`; subsequent reads return the cached
+Promise. This keeps the substrate validator-agnostic — Zod, Valibot,
+ArkType, TypeBox, Effect Schema, Sury are all supported out of the box;
+custom validators register via `loadVendor` from the bridge package.
+
+### Constraints
+
+- Listener-throw short-circuits dispatch. Observers registered after a
+  buggy handler will not run if the handler throws or returns a rejecting
+  promise. Register critical observers at a higher priority than handlers
+  that might throw.
+- Same-priority dispatch order is unspecified. If a caller needs
+  deterministic order, encode it as priority.
+- Pending-forever (silent policy with no claimer) is intentional and is
+  NOT reported as a `CommandError`. Callers using `Command.silent` either
+  arrange external resolution (timer, dialog dismiss, …) or wrap the
+  promise in `Promise.race` with a timeout.
+- `inputJsonSchema` / `outputJsonSchema` are Promises, not sync values. AI
+  tool projection and OpenAPI export consumers await them at projection
+  time; UI menus that only need `label` / `description` / `icon` ignore
+  them entirely.
+- Mutating a registry view (`compose` / `filter` / `namespace`) is not
+  possible — these are read-only by type. Mutate the underlying
+  `MutableCommandsRegistry` instead.
+
+### Dependencies
+
+- `@standard-schema/spec` — type-only. The substrate accepts any
+  Standard-Schema-compliant validator for `.input(schema)` / `.output(schema)`.
+- `@standard-community/standard-json` — runtime, async-first. Derives
+  JSON Schema from Standard Schemas. Vendors (zod, valibot, arktype,
+  typebox, sury, effect) are dynamically imported on first use.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT © statewalker

@@ -1,258 +1,149 @@
 import { describe, expect, it, vi } from "vitest";
-import { defineCommand } from "./define-command.js";
+import { z } from "zod";
+import { Command } from "./command.js";
+import { CommandError } from "./command-error.js";
 import { Commands } from "./types.js";
 
-describe("Commands — dispatch model", () => {
-  it("rejects with `Unhandled command` when no listener and no defaultFn", async () => {
-    const cmd = defineCommand<{ x: number }, string>("test:unhandled");
-    const bus = new Commands();
+const inputSchema = z.object({ x: z.number() });
+const outputSchema = z.object({ y: z.string() });
 
-    const c = bus.call(cmd, { x: 1 });
+const PingCommand = Command.required("test:ping").input(inputSchema).output(outputSchema).build();
 
-    await expect(c.promise).rejects.toThrow("Unhandled command: test:unhandled");
-    expect(c.settled).toBe(true);
-    expect(c.handled).toBe(true);
+describe("Commands — dispatch lifecycle", () => {
+  it("input validation rejects before any listener is invoked", async () => {
+    const commands = new Commands();
+    const listener = vi.fn();
+    commands.listen(PingCommand, listener);
+
+    const cmd = commands.call(PingCommand, { x: "bad" as unknown as number });
+
+    await expect(cmd.promise).rejects.toBeInstanceOf(CommandError);
+    await cmd.promise.catch((e: CommandError) => {
+      expect(e.kind).toBe("input-validation");
+      expect(e.commandKey).toBe("test:ping");
+    });
+    expect(listener).not.toHaveBeenCalled();
   });
 
-  it("listener that returns true claims, command stays pending until external resolve", async () => {
-    const cmd = defineCommand<void, string>("test:claim-true");
-    const bus = new Commands();
+  it("output validation rejects on bad resolve and reports the listener", async () => {
+    const commands = new Commands();
+    const badListener = vi.fn(() => Promise.resolve({ y: 42 as unknown as string }));
+    commands.listen(PingCommand, badListener);
 
-    bus.listen(cmd, () => true);
+    const cmd = commands.call(PingCommand, { x: 1 });
 
-    const c = bus.call(cmd, undefined);
-    expect(c.handled).toBe(true);
-    expect(c.settled).toBe(false);
-
-    Promise.resolve().then(() => c.resolve("late-value"));
-    await expect(c.promise).resolves.toBe("late-value");
+    await expect(cmd.promise).rejects.toBeInstanceOf(CommandError);
+    await cmd.promise.catch((e: CommandError) => {
+      expect(e.kind).toBe("output-validation");
+      expect(e.commandKey).toBe("test:ping");
+      expect(e.listener).toBe(badListener);
+    });
   });
 
-  it("listener returning a Promise claims; bus uses the resolved value", async () => {
-    const cmd = defineCommand<{ n: number }, number>("test:claim-promise");
-    const bus = new Commands();
+  it("priority order determines invocation", async () => {
+    const commands = new Commands();
+    const order: string[] = [];
+    commands.listen(PingCommand, () => {
+      order.push("default");
+    });
+    commands.listen(
+      PingCommand,
+      () => {
+        order.push("high");
+      },
+      { priority: 100 },
+    );
+    commands.listen(
+      PingCommand,
+      () => {
+        order.push("low");
+      },
+      { priority: -1 },
+    );
+    commands.listen(PingCommand, () => Promise.resolve({ y: "ok" }), { priority: 1 });
 
-    bus.listen(cmd, (c) => Promise.resolve(c.payload.n * 2));
-
-    const result = await bus.call(cmd, { n: 21 }).promise;
-    expect(result).toBe(42);
+    await commands.call(PingCommand, { x: 1 }).promise;
+    expect(order).toEqual(["high", "default", "low"]);
   });
 
-  it("listener returning a rejecting Promise rejects the command", async () => {
-    const cmd = defineCommand<void, void>("test:claim-promise-reject");
-    const bus = new Commands();
-    const err = new Error("boom");
+  it("same priority invocation is the set, not order-dependent", async () => {
+    const commands = new Commands();
+    const seen = new Set<string>();
+    commands.listen(PingCommand, () => {
+      seen.add("a");
+    });
+    commands.listen(PingCommand, () => {
+      seen.add("b");
+    });
+    commands.listen(PingCommand, () => Promise.resolve({ y: "ok" }));
 
-    bus.listen(cmd, () => Promise.reject(err));
-
-    await expect(bus.call(cmd, undefined).promise).rejects.toBe(err);
+    await commands.call(PingCommand, { x: 1 }).promise;
+    expect(seen).toEqual(new Set(["a", "b"]));
   });
 
-  it("listener that calls cmd.resolve directly settles the command", async () => {
-    const cmd = defineCommand<void, string>("test:claim-direct");
-    const bus = new Commands();
+  it("listener `return true` claims pending and skips policy enforcement", async () => {
+    const commands = new Commands();
+    commands.listen(PingCommand, () => true);
 
-    bus.listen(cmd, (c) => {
-      c.resolve("direct");
+    const cmd = commands.call(PingCommand, { x: 1 });
+    let resolved = false;
+    cmd.promise.then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    cmd.resolve({ y: "external" });
+    await expect(cmd.promise).resolves.toEqual({ y: "external" });
+  });
+
+  it("listener `Promise<R>` claims and settles after validation", async () => {
+    const commands = new Commands();
+    commands.listen(PingCommand, async () => ({ y: "got" }));
+
+    const result = await commands.call(PingCommand, { x: 1 }).promise;
+    expect(result).toEqual({ y: "got" });
+  });
+
+  it("listener throw → CommandError('listener-threw') with cause and listener", async () => {
+    const commands = new Commands();
+    const thrower = vi.fn(() => {
+      throw new Error("boom");
+    });
+    commands.listen(PingCommand, thrower);
+
+    const cmd = commands.call(PingCommand, { x: 1 });
+    await expect(cmd.promise).rejects.toBeInstanceOf(CommandError);
+    await cmd.promise.catch((e: CommandError) => {
+      expect(e.kind).toBe("listener-threw");
+      expect((e.cause as Error).message).toBe("boom");
+      expect(e.listener).toBe(thrower);
+    });
+  });
+
+  it("rejected listener promise → CommandError('listener-threw')", async () => {
+    const commands = new Commands();
+    const rejector = vi.fn(() => Promise.reject(new Error("nope")));
+    commands.listen(PingCommand, rejector);
+
+    const cmd = commands.call(PingCommand, { x: 1 });
+    await expect(cmd.promise).rejects.toBeInstanceOf(CommandError);
+    await cmd.promise.catch((e: CommandError) => {
+      expect(e.kind).toBe("listener-threw");
+      expect((e.cause as Error).message).toBe("nope");
+      expect(e.listener).toBe(rejector);
+    });
+  });
+
+  it("multi-resolve is no-op via settled-guard", async () => {
+    const commands = new Commands();
+    commands.listen(PingCommand, (cmd) => {
+      cmd.resolve({ y: "first" });
+      cmd.resolve({ y: "second" });
+      cmd.reject(new Error("ignored"));
     });
 
-    await expect(bus.call(cmd, undefined).promise).resolves.toBe("direct");
-  });
-
-  it("listener that throws rejects the command", async () => {
-    const cmd = defineCommand<void, void>("test:claim-throw");
-    const bus = new Commands();
-    const err = new Error("kaboom");
-
-    bus.listen(cmd, () => {
-      throw err;
-    });
-
-    await expect(bus.call(cmd, undefined).promise).rejects.toBe(err);
-  });
-
-  it("listener returning void/undefined is observe-only — default still runs", async () => {
-    const cmd = defineCommand<void, string>("test:observer-only", () => "default-value");
-    const bus = new Commands();
-
-    const seen: number[] = [];
-    bus.listen(cmd, () => {
-      seen.push(1);
-      // returns undefined → observer
-    });
-    bus.listen(cmd, () => {
-      seen.push(2);
-    });
-
-    const result = await bus.call(cmd, undefined).promise;
-    expect(seen).toEqual([1, 2]);
-    expect(result).toBe("default-value");
-  });
-
-  it("ALL listeners are notified even after one claims", async () => {
-    const cmd = defineCommand<void, string>("test:notify-all");
-    const bus = new Commands();
-    const seen: string[] = [];
-
-    bus.listen(cmd, () => {
-      seen.push("first-claims");
-      return true;
-    });
-    bus.listen(cmd, (c) => {
-      seen.push(`second-sees-handled=${c.handled}`);
-    });
-    bus.listen(cmd, (c) => {
-      seen.push(`third-sees-handled=${c.handled}`);
-      c.resolve("value-from-third");
-    });
-
-    const result = await bus.call(cmd, undefined).promise;
-    expect(seen).toEqual([
-      "first-claims",
-      "second-sees-handled=true",
-      "third-sees-handled=true",
-    ]);
-    expect(result).toBe("value-from-third");
-  });
-
-  it("first to settle wins; later resolves no-op via settled-guard", async () => {
-    const cmd = defineCommand<void, string>("test:first-settle-wins");
-    const bus = new Commands();
-
-    bus.listen(cmd, (c) => {
-      c.resolve("first");
-    });
-    bus.listen(cmd, (c) => {
-      c.resolve("second"); // no-op, settled-guard
-    });
-
-    await expect(bus.call(cmd, undefined).promise).resolves.toBe("first");
-  });
-
-  it("decl-level default runs only when no listener claimed", async () => {
-    const defaultFn = vi.fn(() => "default");
-    const cmd = defineCommand<void, string>("test:default-runs", defaultFn);
-    const bus = new Commands();
-
-    bus.listen(cmd, () => {
-      // observer
-    });
-
-    const result = await bus.call(cmd, undefined).promise;
-    expect(result).toBe("default");
-    expect(defaultFn).toHaveBeenCalledTimes(1);
-  });
-
-  it("decl-level default is skipped when a listener claims", async () => {
-    const defaultFn = vi.fn(() => "default");
-    const cmd = defineCommand<void, string>("test:default-skipped", defaultFn);
-    const bus = new Commands();
-
-    bus.listen(cmd, () => Promise.resolve("from-listener"));
-
-    const result = await bus.call(cmd, undefined).promise;
-    expect(result).toBe("from-listener");
-    expect(defaultFn).not.toHaveBeenCalled();
-  });
-
-  it("default that returns a Promise is awaited", async () => {
-    const cmd = defineCommand<void, number>("test:default-promise", () => Promise.resolve(7));
-    const bus = new Commands();
-
-    await expect(bus.call(cmd, undefined).promise).resolves.toBe(7);
-  });
-
-  it("default that throws rejects the command", async () => {
-    const err = new Error("default-throws");
-    const cmd = defineCommand<void, void>("test:default-throws", () => {
-      throw err;
-    });
-    const bus = new Commands();
-
-    await expect(bus.call(cmd, undefined).promise).rejects.toBe(err);
-  });
-
-  it("noop default (silent-pending) leaves the command pending forever", async () => {
-    const cmd = defineCommand<void, string>("test:silent-pending", () => {
-      // noop — caller settles externally
-    });
-    const bus = new Commands();
-
-    const c = bus.call(cmd, undefined);
-    expect(c.settled).toBe(false);
-    expect(c.handled).toBe(true); // bus marks handled to skip the loud-fail
-
-    // External settle
-    Promise.resolve().then(() => c.resolve("eventually"));
-    await expect(c.promise).resolves.toBe("eventually");
-  });
-
-  it("listen() returns a disposer that removes the listener", async () => {
-    const cmd = defineCommand<void, string>("test:dispose");
-    const bus = new Commands();
-    const fn = vi.fn(() => Promise.resolve("ok"));
-
-    const dispose = bus.listen(cmd, fn);
-
-    await bus.call(cmd, undefined).promise;
-    expect(fn).toHaveBeenCalledTimes(1);
-
-    dispose();
-
-    // No listener → unhandled
-    await expect(bus.call(cmd, undefined).promise).rejects.toThrow("Unhandled command:");
-    expect(fn).toHaveBeenCalledTimes(1);
-  });
-
-  it("multiple listeners — claiming Promise vs observer", async () => {
-    const cmd = defineCommand<void, number>("test:promise-and-observer");
-    const bus = new Commands();
-    const observed: boolean[] = [];
-
-    bus.listen(cmd, (c) => {
-      observed.push(c.handled);
-      // observer — runs first, sees nothing claimed yet
-    });
-    bus.listen(cmd, () => Promise.resolve(42));
-    bus.listen(cmd, (c) => {
-      observed.push(c.handled);
-      // observer — runs after, sees handled
-    });
-
-    const result = await bus.call(cmd, undefined).promise;
-    expect(result).toBe(42);
-    expect(observed).toEqual([false, true]);
-  });
-
-  it("declaration is frozen and brand-distinct from raw object", () => {
-    const cmd = defineCommand<{ x: number }, string>("test:frozen");
-    expect(cmd.key).toBe("test:frozen");
-    expect(Object.isFrozen(cmd)).toBe(true);
-  });
-
-  it("two declarations with the same key target the same dispatcher entry", async () => {
-    const a = defineCommand<void, string>("test:same-key");
-    const b = defineCommand<void, string>("test:same-key");
-    const bus = new Commands();
-
-    bus.listen(a, () => Promise.resolve("via-a"));
-
-    const result = await bus.call(b, undefined).promise;
-    expect(result).toBe("via-a");
-  });
-
-  it("Command three-state lifecycle exposes pending/handled/settled correctly", () => {
-    const cmd = defineCommand<void, string>("test:lifecycle", () => {});
-    const bus = new Commands();
-
-    bus.listen(cmd, () => true);
-
-    const c = bus.call(cmd, undefined);
-    expect(c.handled).toBe(true);
-    expect(c.settled).toBe(false);
-
-    c.resolve("done");
-    expect(c.handled).toBe(true);
-    expect(c.settled).toBe(true);
+    const result = await commands.call(PingCommand, { x: 1 }).promise;
+    expect(result).toEqual({ y: "first" });
   });
 });

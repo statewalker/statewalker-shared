@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": false,
   "type": "module",
-  "description": "Typed command bus for cross-fragment late binding. Declare commands via `defineCommand(key)`; dispatch via `commands.call(decl, payload)`; register listeners via `commands.listen(decl, fn)`.",
+  "description": "Typed command bus and reactive registry. Declare commands via `Command.required(key).input(s).output(s).build()`; dispatch via `commands.call(decl, payload)`; register listeners via `commands.listen(decl, fn, { priority? })`; compose declarations via `CommandsRegistry.create/.compose/.filter/.namespace`.",
   "keywords": [
     "command",
     "command-pattern",
@@ -39,11 +39,16 @@
     "lint": "biome check --write .",
     "format": "biome format --write ."
   },
+  "dependencies": {
+    "@standard-community/standard-json": "catalog:",
+    "@standard-schema/spec": "catalog:"
+  },
   "devDependencies": {
     "rimraf": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "zod": "catalog:"
   },
   "sideEffects": false,
   "publishConfig": {
