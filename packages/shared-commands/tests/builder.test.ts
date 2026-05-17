@@ -1,8 +1,8 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
-import { Command } from "./command.js";
-import type { CommandDeclaration } from "./types.js";
+import { Command } from "../src/command.js";
+import type { CommandDeclaration } from "../src/types.js";
 
 function passthrough<T>(vendor = "test"): StandardSchemaV1<T, T> {
   return {

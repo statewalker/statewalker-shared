@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Command } from "./command.js";
-import { CommandsRegistry } from "./registry.js";
+import { Command } from "../src/command.js";
+import { CommandsRegistry } from "../src/registry.js";
 
 const A = Command.required("a").input(z.object({})).output(z.object({})).build();
 const B = Command.required("b").input(z.object({})).output(z.object({})).build();

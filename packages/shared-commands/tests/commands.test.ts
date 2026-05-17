@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Command } from "./command.js";
-import { CommandError } from "./command-error.js";
-import { Commands } from "./types.js";
+import { Command } from "../src/command.js";
+import { CommandError } from "../src/command-error.js";
+import { Commands } from "../src/types.js";
 
 const inputSchema = z.object({ x: z.number() });
 const outputSchema = z.object({ y: z.string() });

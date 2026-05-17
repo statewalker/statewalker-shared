@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { BaseClass } from "./base-class.js";
-import { onChange } from "./on-change.js";
+import { BaseClass } from "../src/base-class.js";
+import { onChange } from "../src/on-change.js";
 
 describe("onChange", () => {
   it("fires callback only when derived value changes", () => {

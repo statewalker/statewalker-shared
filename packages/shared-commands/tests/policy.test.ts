@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { Command } from "./command.js";
-import { CommandError } from "./command-error.js";
-import { Commands } from "./types.js";
+import { Command } from "../src/command.js";
+import { CommandError } from "../src/command-error.js";
+import { Commands } from "../src/types.js";
 
 async function drainMicrotasks(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve();

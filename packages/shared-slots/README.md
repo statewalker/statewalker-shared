@@ -1,31 +1,32 @@
 # @statewalker/shared-slots
 
-Typed pub/sub slots for cross-fragment extension points.
+## What it is
 
-## Installation
+Framework-agnostic typed pub/sub slots for declared extension points. A
+slot's owning module declares the contract; other modules contribute
+values; consumers iterate or look up contributions through one `Slots`
+bus. Two slot kinds — plain (append-only set) and keyed (id-indexed map) —
+share the same bus.
+
+## Why it exists
+
+Extension points let a host surface accept contributions from modules
+that the host does not directly import. Hard-coding contribution lists in
+the host couples it to every contributor; ad-hoc event buses lose types
+and disposer hygiene.
+
+`defineSlot` / `defineKeyedSlot` return frozen, typed declarations keyed
+by stable strings. `Slots` is the runtime bus: `provide`, `register`,
+`observe`, `getSnapshot`, `get`. The declaring module never names a
+contributor; contributors and observers import the declaration directly.
+That one-way dependency arrow makes contributions composable without
+mutual imports.
+
+## How to use
 
 ```sh
 pnpm add @statewalker/shared-slots
 ```
-
-## Why this exists
-
-Slots are the umbrella's primitive for **declared extension points**.
-A fragment owning a surface declares a slot; other fragments contribute
-values; the consumer iterates the contributions.
-
-Two flavors share one bus:
-
-- **Plain slot** (`defineSlot<T>(key)`) — append-only, reference-deduped
-  set. Used when contributions are consumed together (e.g. a sorted
-  list of toolbar actions).
-- **Keyed slot** (`defineKeyedSlot<T>(key)`) — id-keyed map with
-  collision-throw on duplicate ids. Used when contributions are
-  addressable by stable id (e.g. registries of components by viewKey).
-
-One workspace = one bus, accessed via `workspace.requireAdapter(Slots)`.
-
-## Usage
 
 ### Declare slots
 
@@ -49,7 +50,7 @@ export const coreViewsSlot =
 ### Plain-slot operations
 
 ```ts
-const slots = workspace.requireAdapter(Slots);
+const slots = new Slots();
 
 // Provider:
 const dispose = slots.provide(mimeRenderersSlot, {
@@ -80,23 +81,29 @@ const View = slots.get(coreViewsSlot, "chat:turn-block:tool-call");
 const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
 ```
 
-## Semantics
+## Examples
+
+See the snippets above — the plain-slot path covers ranked contribution
+selection, and the keyed-slot path covers id-addressable component
+registries.
+
+## Internals
 
 ### Plain slots
 
 - **Reference identity.** Values stored in a `Set`, deduped by reference.
   Providing the same object twice = one entry. Two structurally-equal
   distinct objects = two entries.
-- **Snapshot stability.** `getSnapshot(decl)` returns a frozen
-  array, reference-stable until the next mutation.
-  `useSyncExternalStore`-safe.
+- **Snapshot stability.** `getSnapshot(decl)` returns a frozen array,
+  reference-stable until the next mutation. Safe to feed straight into
+  `useSyncExternalStore` consumers.
 - **Observe.** Callback fires once synchronously with the current
   snapshot, then synchronously on every mutation.
 
 ### Keyed slots
 
-- **Collision-throw.** Registering two *different* values under the
-  same id throws `RangeError` synchronously.
+- **Collision-throw.** Registering two *different* values under the same
+  id throws `RangeError` synchronously.
 - **Ref-counted re-register.** Registering the *same* value reference
   under the same id is a ref-counted no-op (the entry survives until
   every disposer fires).
@@ -105,21 +112,33 @@ const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
 - **Observe.** Same semantics as plain — sync immediate snapshot then
   sync notifications, with `ReadonlyMap<string, T>` as the value.
 
-### Workspace scoping
+### Bus scoping
 
-`Slots` is registered on the workspace as an adapter. **One workspace
-= one bus**: contributions made by one fragment are observable by
-every other fragment in the same composition. Direct `new Slots()` is
-supported for tests only.
+`Slots` is a plain class. Construct one bus per scope (typically per
+top-level composition unit) and share that instance between providers
+and observers. Plain and keyed slot kinds use independent internal maps,
+so the same key string in both kinds refers to two unrelated slots.
 
 ### Dependency direction
 
-The slot's declaring module is the contract owner. The owner must
-not depend on any specific provider or observer. Providers and
-observers may freely import the contract. This is the one-way arrow
-that makes slots Eclipse-style — a third-party fragment can declare
-its own slot and other fragments can contribute without touching
-either the fragment or the host.
+The slot's declaring module is the contract owner. The owner must not
+depend on any specific provider or observer. Providers and observers may
+freely import the contract. This is the one-way arrow that makes a
+third-party module able to declare its own slot and others contribute
+without touching either the module or the host.
+
+### Constraints
+
+- Snapshots are frozen but the values they contain are not — consumers
+  must not mutate contributed objects.
+- Observers run synchronously; an exception in one observer is caught
+  and reported via `console.error`, then the remaining observers fire.
+- Two different `Slots` instances are completely isolated — there is no
+  cross-instance broadcast.
+
+### Dependencies
+
+Zero runtime dependencies.
 
 ## API
 
@@ -131,13 +150,6 @@ either the fragment or the host.
   - `getSnapshot(decl): readonly T[]` (plain only)
   - `register(decl, id, value): () => void` (keyed; collision-throws)
   - `get(decl, id): T | null` (keyed)
-
-## Related
-
-- `@statewalker/shared-commands` — the sibling RPC bus (was: shared-intents).
-- `@statewalker/shared-registry` — LIFO cleanup for `provide` /
-  `register` / `observe` disposers.
-- `@statewalker/workspace` — the `Workspace` adapter host.
 
 ## License
 

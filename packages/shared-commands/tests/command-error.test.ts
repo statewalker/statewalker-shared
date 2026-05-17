@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { CommandError } from "./command-error.js";
-import type { CommandListener } from "./types.js";
+import { CommandError } from "../src/command-error.js";
+import type { CommandListener } from "../src/types.js";
 
 describe("CommandError", () => {
   it("is both Error and CommandError instance", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BaseClass } from "./base-class.js";
+import { BaseClass } from "../src/base-class.js";
 
 describe("BaseClass", () => {
   it("should notify listeners on notify()", () => {

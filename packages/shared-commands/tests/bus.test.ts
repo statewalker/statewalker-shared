@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { Command } from "./command.js";
-import { Commands } from "./types.js";
+import { Command } from "../src/command.js";
+import { Commands } from "../src/types.js";
 
 const Decl = Command.required("bus:test")
   .input(z.object({}))

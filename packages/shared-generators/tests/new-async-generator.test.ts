@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newAsyncGenerator } from "./new-async-generator.js";
+import { newAsyncGenerator } from "../src/new-async-generator.js";
 
 async function delay(ms: number = 0): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));

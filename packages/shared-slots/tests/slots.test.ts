@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { defineKeyedSlot, defineSlot } from "./define-slot.js";
-import { Slots } from "./types.js";
+import { defineKeyedSlot, defineSlot } from "../src/define-slot.js";
+import { Slots } from "../src/types.js";
 
 describe("Slots — plain", () => {
   const k = defineSlot<string>("k");

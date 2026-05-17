@@ -24,7 +24,7 @@
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist",
@@ -37,6 +37,7 @@
     "pino-pretty": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "rimraf": "catalog:",
     "tsdown": "catalog:",
     "typescript": "catalog:",

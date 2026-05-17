@@ -43,7 +43,10 @@ export class Slots {
   // Keyed-slot storage. The bus owns the index and version counter
   // per key, shared across all consumers of the same keyed slot.
   private readonly _keyedEntries = new Map<string, Map<string, KeyedEntry<unknown>>>();
-  private readonly _keyedWatchers = new Map<string, Set<(entries: ReadonlyMap<string, unknown>) => void>>();
+  private readonly _keyedWatchers = new Map<
+    string,
+    Set<(entries: ReadonlyMap<string, unknown>) => void>
+  >();
   private readonly _keyedSnapshots = new Map<string, ReadonlyMap<string, unknown>>();
 
   /**
