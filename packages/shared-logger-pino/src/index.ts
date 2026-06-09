@@ -2,7 +2,7 @@ import type { Logger, LoggerLevel } from "@statewalker/shared-logger";
 import { getProcessId, setLogger } from "@statewalker/shared-logger";
 import pino from "pino";
 
-function newPinoLogger(level: LoggerLevel, metadata: Record<string, unknown> = {}): Logger {
+export function newPinoLogger(level: LoggerLevel, metadata: Record<string, unknown> = {}): Logger {
   const pinoInstance = pino({
     level,
     ...(process.env.NODE_ENV !== "production" && {
