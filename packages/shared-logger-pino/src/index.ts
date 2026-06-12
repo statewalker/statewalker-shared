@@ -2,24 +2,36 @@ import type { Logger, LoggerLevel } from "@statewalker/shared-logger";
 import { getProcessId, setLogger } from "@statewalker/shared-logger";
 import pino from "pino";
 
-export function newPinoLogger(level: LoggerLevel, metadata: Record<string, unknown> = {}): Logger {
-  const pinoInstance = pino({
+export function newPinoLogger(
+  level: LoggerLevel,
+  metadata: Record<string, unknown> = {},
+  options: { destination?: 1 | 2 } = {},
+): Logger {
+  // Output file descriptor: 1 = stdout (default), 2 = stderr. Routing logs to
+  // stderr lets a command keep stdout as a clean machine-readable data channel.
+  const destination = options.destination ?? 1;
+  const base = {
     level,
-    ...(process.env.NODE_ENV !== "production" && {
-      transport: {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          translateTime: "HH:MM:ss",
-          ignore: "pid,hostname",
-        },
-      },
-    }),
     formatters: {
-      level: (label) => ({ level: label }),
+      level: (label: string) => ({ level: label }),
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-  });
+  };
+  const pinoInstance =
+    process.env.NODE_ENV !== "production"
+      ? pino({
+          ...base,
+          transport: {
+            target: "pino-pretty",
+            options: {
+              colorize: true,
+              translateTime: "HH:MM:ss",
+              ignore: "pid,hostname",
+              destination,
+            },
+          },
+        })
+      : pino(base, pino.destination(destination));
 
   return wrapPino(pinoInstance, metadata);
 }
