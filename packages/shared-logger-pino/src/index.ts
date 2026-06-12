@@ -2,11 +2,27 @@ import type { Logger, LoggerLevel } from "@statewalker/shared-logger";
 import { getProcessId, setLogger } from "@statewalker/shared-logger";
 import pino from "pino";
 
+/** True when running on Node (vs a browser/worker bundle). */
+function isNodeRuntime(): boolean {
+  return (
+    typeof process !== "undefined" &&
+    !!(process as { versions?: { node?: string } }).versions?.node
+  );
+}
+
 export function newPinoLogger(
   level: LoggerLevel,
   metadata: Record<string, unknown> = {},
   options: { destination?: 1 | 2 } = {},
 ): Logger {
+  // Browser/worker: pino's browser build routes to `console`; transports,
+  // `pino-pretty`, and fd destinations are Node-only and absent here, so we never
+  // touch them (nor `process`). Structured bindings/metadata are emitted as an
+  // object so browser logs carry the same shape as the Node ones.
+  if (!isNodeRuntime()) {
+    return wrapPino(pino({ level, browser: { asObject: true } }), metadata);
+  }
+
   // Output file descriptor: 1 = stdout (default), 2 = stderr. Routing logs to
   // stderr lets a command keep stdout as a clean machine-readable data channel.
   const destination = options.destination ?? 1;
