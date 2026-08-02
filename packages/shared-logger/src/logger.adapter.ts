@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { newAdapter } from "@statewalker/shared-adapters";
 
 const Levels = {
