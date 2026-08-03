@@ -77,7 +77,11 @@ export const [getLogger, setLogger, removeLogger] = newAdapter<Logger, Record<st
     const logger = newConsoleLogger("warn").child({
       processId: getProcessId(context),
     });
-    const logLevel = (process.env.LOG_LEVEL ?? "info") as LoggerLevel;
+    // Self-typed access: this package is source-consumed by host-neutral packages whose
+    // tsconfig lacks node types, and `process` is absent in the browser — guard both.
+    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+      ?.env;
+    const logLevel = (env?.LOG_LEVEL ?? "info") as LoggerLevel;
     logger.level = logLevel;
     logger.info(`[backbone] Starting up with log level: ${logLevel}`);
     return logger;
