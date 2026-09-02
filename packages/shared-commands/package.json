@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-commands",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Typed command bus and reactive registry. Declare commands via `Command.required(key).input(s).output(s).build()`; dispatch via `commands.call(decl, payload)`; register listeners via `commands.listen(decl, fn, { priority? })`; compose declarations via `CommandsRegistry.create/.compose/.filter/.namespace`.",

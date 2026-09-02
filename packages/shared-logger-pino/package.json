@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-logger-pino",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Pino-backed production logger adapter for the shared-logger interface.",

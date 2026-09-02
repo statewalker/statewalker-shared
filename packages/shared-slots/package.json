@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-slots",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": false,
   "type": "module",
   "description": "Framework-agnostic typed pub/sub slots for cross-fragment extension points. Declarations via `defineSlot(key)` / `defineKeyedSlot(key)`; bus methods on `Slots` take the declaration.",

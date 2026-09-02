@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-registry",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "Disposer registry: register lifecycle callbacks and tear them down in LIFO order.",
