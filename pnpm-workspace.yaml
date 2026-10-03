@@ -3,7 +3,7 @@ packages:
   - "apps/*"
 
 catalog:
-  "@changesets/cli": "^2.31.1"
+  "@changesets/cli": "^3.0.3"
   "@biomejs/biome": ^2.5.15
   "@standard-community/standard-json": ^0.3.6
   "@standard-schema/spec": ^1.1.0
