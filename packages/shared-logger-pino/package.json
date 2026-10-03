@@ -32,7 +32,7 @@
     "format": "biome format --write ."
   },
   "dependencies": {
-    "@statewalker/shared-logger": "workspace:*",
+    "@statewalker/shared-logger": "workspace:^",
     "pino": "catalog:",
     "pino-pretty": "catalog:"
   },
