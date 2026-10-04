@@ -4,6 +4,9 @@
   "private": false,
   "type": "module",
   "description": "Typed command bus and reactive registry. Declare commands via `Command.required(key).input(s).output(s).build()`; dispatch via `commands.call(decl, payload)`; register listeners via `commands.listen(decl, fn, { priority? })`; compose declarations via `CommandsRegistry.create/.compose/.filter/.namespace`.",
+  "bugs": {
+    "url": "https://github.com/statewalker/statewalker-shared/issues"
+  },
   "keywords": [
     "command",
     "command-pattern",
@@ -12,7 +15,7 @@
     "fragment",
     "extension-point"
   ],
-  "homepage": "https://github.com/statewalker/statewalker-shared",
+  "homepage": "https://github.com/statewalker/statewalker-shared/tree/main/packages/shared-commands#readme",
   "author": {
     "name": "Mikhail Kotelnikov",
     "email": "mikhail.kotelnikov@gmail.com"
@@ -20,7 +23,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/statewalker/statewalker-shared.git"
+    "url": "git+https://github.com/statewalker/statewalker-shared.git",
+    "directory": "packages/shared-commands"
   },
   "exports": {
     ".": {
