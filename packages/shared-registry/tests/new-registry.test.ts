@@ -78,7 +78,7 @@ describe("newRegistry", () => {
 
     await cleanup();
     expect(onError).toHaveBeenCalledTimes(1);
-    expect((onError.mock.calls[0]?.[0] as Error).message).toBe("boom");
+    expect((onError.mock.calls[0]?.[0] as Error | undefined)?.message).toBe("boom");
     expect(stillRuns).toHaveBeenCalledOnce();
   });
 

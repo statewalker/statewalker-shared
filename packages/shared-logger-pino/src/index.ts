@@ -5,8 +5,7 @@ import pino from "pino";
 /** True when running on Node (vs a browser/worker bundle). */
 function isNodeRuntime(): boolean {
   return (
-    typeof process !== "undefined" &&
-    !!(process as { versions?: { node?: string } }).versions?.node
+    typeof process !== "undefined" && !!(process as { versions?: { node?: string } }).versions?.node
   );
 }
 
