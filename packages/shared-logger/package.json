@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-logger",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": false,
   "type": "module",
   "description": "Logger interface and stdout-backed implementation.",
