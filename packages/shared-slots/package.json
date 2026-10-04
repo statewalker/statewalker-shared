@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-slots",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": false,
   "type": "module",
   "description": "Framework-agnostic typed pub/sub slots for cross-fragment extension points. Declarations via `defineSlot(key)` / `defineKeyedSlot(key)`; bus methods on `Slots` take the declaration.",
@@ -15,7 +15,12 @@
     "url": "git+ssh://git@github.com/statewalker/statewalker-shared.git"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
