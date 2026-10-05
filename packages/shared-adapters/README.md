@@ -91,12 +91,31 @@ const [getLogger] = newAdapter<Logger>("app:logger");
 const maybe = getLogger(ctx, true); // returns undefined instead of throwing
 ```
 
+## Entry points
+
+One entry point, `@statewalker/shared-adapters` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+## API
+
+- `newAdapter<T, P>(key, create?, getParent?)` returns
+  `[get, set, remove]`.
+  - `get(context, optional?)` looks the value up (walking parents), creates it
+    with `create` if missing, and throws `Adapter not found: <key>` when there
+    is still no value and `optional` is not `true`.
+  - `set(context, value)` stores the value on the context.
+  - `remove(context)` deletes the key from the context.
+  - `getParent` defaults to `context.parent`.
+- `getAdapter<T, O>(key, create, getParent?)` returns `[get, remove]`.
+  `create` is required, and `getParent` defaults to "no parent" (no
+  inheritance), unlike `newAdapter`.
+
 ## Internals
 
 ### Lookup algorithm
 
-`get(context)` walks ancestors via `getParent`, returning the first object on
-the chain that has the adapter's key. If none is found and a `create` factory
+`get(context)` walks ancestors via `getParent` and returns the first value
+found under the adapter's key that is not `undefined`. If none is found and a `create` factory
 was supplied, the factory runs and the value is cached on the **original**
 context (not on the ancestor that triggered the lookup). Otherwise `get`
 throws — unless called with `optional = true`, in which case it returns
@@ -114,8 +133,8 @@ throws — unless called with `optional = true`, in which case it returns
 
 - Adapter keys are flat strings. Use `domain:name` (e.g. `app:logger`,
   `api:files`) to avoid collisions when many fragments share one context.
-- The context must be a non-null object. Adapters do not work on primitives,
-  arrays, or frozen objects (set/cache requires writability).
+- The context must be a non-null, writable object. On primitives `set` and
+  the factory cache are silently skipped; on frozen objects they fail.
 
 ### Dependencies
 
@@ -123,4 +142,4 @@ Zero runtime dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

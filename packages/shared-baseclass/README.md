@@ -120,6 +120,27 @@ m.toJSON();   // { name: "alice", score: 0 } — drops underscore-prefixed field
 m.fromJSON({ score: 5 }); // mutates and notifies if any property actually changed
 ```
 
+## Entry points
+
+One entry point, `@statewalker/shared-baseclass` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+## API
+
+- `BaseClass` — `onUpdate(cb): () => void` (an arrow property, so it can be
+  passed around unbound), `notify()`, `toJSON()`, `fromJSON(obj): this`.
+- `onChange(onUpdate, callback, getValue): () => void` — call `callback` only
+  when `getValue()` changes (strict equality).
+- `onChangeNotifier(onUpdate, getValue)` — same, returned as a reusable
+  `(callback) => unsubscribe` function.
+- `waitFor(onUpdate, check): Promise<void>` — resolve once `check()` is true.
+- `waitForValue(onUpdate, get): Promise<T>` — resolve with the first
+  non-`undefined` value of `get()`.
+- `waitForSettled(model): Promise<model>` — `waitFor` on `model.isSettled()`;
+  the model must match the exported `Settleable` interface.
+- `readValues(onUpdate, read): AsyncGenerator<T>` — yield every
+  non-`undefined` value of `read()`, re-reading after each update.
+
 ## Internals
 
 ### Notification model
@@ -162,4 +183,4 @@ Zero runtime dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

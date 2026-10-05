@@ -1,104 +1,105 @@
 # @statewalker/shared-logger-pino
 
-## What it is
+A [pino](https://getpino.io)-backed implementation of the `Logger` interface
+from [`@statewalker/shared-logger`](../shared-logger). Code that calls
+`getLogger(ctx)` keeps working unchanged; it gets structured pino output
+instead of the console logger. On Node it writes JSON in production and
+pretty, colorized lines (via `pino-pretty`) otherwise. In browsers and workers
+it uses pino's browser build, which logs to `console`.
 
-A pino-backed implementation of the `@statewalker/shared-logger` `Logger`
-interface. Exports a single default async function, `initServiceLogger(ctx)`,
-that creates a pino instance, wraps it as a `Logger`, and binds it on the
-context via `setLogger`.
-
-## Why it exists
-
-In production (Node services, workers), the default console logger from
-`@statewalker/shared-logger` is too noisy and lacks structured output.
-Swapping in pino gives structured JSON logs in production and pretty
-colorised output in development — without changing any call site that uses
-`getLogger(ctx)`.
-
-This package is the integration boundary: it owns the pino dependency, the
-pino transport configuration, and the multi-arg → pino metadata translation.
-
-## How to use
+## Installation
 
 ```sh
-pnpm add @statewalker/shared-logger-pino
+pnpm add @statewalker/shared-logger-pino @statewalker/shared-logger
 ```
+
+`pino` and `pino-pretty` are regular dependencies and are installed with the
+package. `@statewalker/shared-logger` is also a dependency; add it directly
+when you import `getLogger` from it, as in the examples.
+
+## Entry points
+
+One entry point, `@statewalker/shared-logger-pino` (ESM, `dist/index.js` with
+types):
+
+- default export `initServiceLogger(ctx)` — creates a pino logger and installs
+  it on the context.
+- named export `newPinoLogger(level, metadata?, options?)` — creates a pino
+  logger without installing it.
+
+## Usage
 
 ```ts
 import initServiceLogger from "@statewalker/shared-logger-pino";
 import { getLogger } from "@statewalker/shared-logger";
 
 const ctx: Record<string, unknown> = {};
-await initServiceLogger(ctx);
+const shutdownLogger = await initServiceLogger(ctx);
 
 const log = getLogger(ctx);
 log.info("service started", { port: 3000 });
-```
 
-## Examples
-
-### Bootstrap in a service entry point
-
-```ts
-import initServiceLogger from "@statewalker/shared-logger-pino";
-
-export async function main() {
-  const ctx: Record<string, unknown> = {};
-  const shutdownLogger = await initServiceLogger(ctx);
-  try {
-    await runServer(ctx);
-  } finally {
-    await shutdownLogger();
-  }
-}
-```
-
-### Child logger with request metadata
-
-```ts
-const log = getLogger(ctx);
-const reqLog = log.child({ requestId: req.id, userId: req.user?.id });
+const reqLog = log.child({ requestId: "req-42" });
 reqLog.info("incoming");
+
+await shutdownLogger();
 ```
 
-## Internals
+Send logs to stderr, for example in a CLI that keeps stdout for data:
 
-### Transport selection
+```ts
+import { setLogger } from "@statewalker/shared-logger";
+import { newPinoLogger } from "@statewalker/shared-logger-pino";
 
-- `process.env.NODE_ENV === "production"` → plain pino JSON to stdout.
-- Anything else (dev / test) → `pino-pretty` transport with colorised
-  output and human-readable timestamps.
+setLogger(ctx, newPinoLogger("info", { component: "cli" }, { destination: 2 }));
+```
 
-### Multi-argument translation
+## API
 
-The `Logger` interface accepts varargs (`log.info(msg, extra1, extra2)`),
-which pino does not. The wrapper folds extra args into `{ extra: ... }`
-metadata: a single extra is passed as-is; multiple extras are collected
-into an array. The first string argument is treated as the message; if
-the first arg is not a string, the whole call is logged as
-`{ args: [...] }`.
+### `initServiceLogger(ctx): Promise<() => Promise<void>>` (default export)
 
-### Level field formatter
+- Reads the level from `process.env.LOG_LEVEL` (default `info`).
+- Calls `newPinoLogger(level, { processId: getProcessId(ctx) })` and installs
+  the result with `setLogger(ctx, logger)`.
+- Logs `[service-logger] Pino logger initialized` at `info`.
+- Also sets `ctx.logger` to the logger's `info` function.
+- Returns a shutdown function. It currently does nothing; call it anyway so
+  that later versions can flush output.
 
-The pino formatters replace numeric level codes with the string label so
-ingestion pipelines can filter by `level == "warn"` without remapping.
+It reads `process.env`, so call it on Node. In browsers, use `newPinoLogger`
+with `setLogger` instead.
 
-### Constraints
+### `newPinoLogger(level, metadata = {}, options = {}): Logger`
 
-- The service-side init is async because pino's worker-thread transport
-  initialisation is async. Always `await initServiceLogger(...)` before
-  the first `getLogger(...)` call to ensure the pino instance — not the
-  default console fallback — is installed on the context.
-- The returned shutdown function is currently a noop. It exists so future
-  versions can flush pino's worker transport without changing the call
-  site.
+- `level` — a `LoggerLevel` (`trace` … `fatal`).
+- `metadata` — bound to every line (pino child bindings).
+- `options.destination` — `1` (stdout, default) or `2` (stderr). Node only.
 
-### Dependencies
+On Node, `NODE_ENV === "production"` gives plain pino JSON written to the
+destination; any other value uses the `pino-pretty` transport (colorized,
+`HH:MM:ss` timestamps, `pid` and `hostname` hidden). Levels are written as
+string labels (`"level": "warn"`) and timestamps as ISO strings.
 
-- `@statewalker/shared-logger` — `Logger` interface and adapter wiring.
-- `pino` — log core.
-- `pino-pretty` — dev transport.
+In browsers and workers it returns a logger based on
+`pino({ level, browser: { asObject: true } })` and does not touch `process`,
+transports or file descriptors.
+
+## Argument mapping
+
+The `Logger` interface takes any arguments; pino takes an optional object and
+a message. The wrapper maps them like this:
+
+- one argument: passed to pino as is;
+- several arguments with a string first: the string is the message, the rest
+  goes to `{ extra }` (a single value, or an array for several);
+- several arguments with a non-string first: logged as `{ args: [...] }`;
+- no arguments: nothing is logged.
+
+## Related
+
+- [`@statewalker/shared-logger`](../shared-logger) — `Logger` interface,
+  console logger, `getLogger` / `setLogger`.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

@@ -63,6 +63,26 @@ const close = await trace(ctx);
 close();
 ```
 
+## Entry points
+
+One entry point, `@statewalker/shared-logger` (ESM, `dist/index.js` with
+types). Works in browsers, Node and workers.
+
+## API
+
+- `Logger` — type with `level`, `trace`, `debug`, `info`, `warn`, `error`,
+  `fatal`, `child(metadata)`.
+- `LoggerLevel` — `"trace" | "debug" | "info" | "warn" | "error" | "fatal"`.
+- `newConsoleLogger(level = "info", metadata = {})` — console implementation.
+  Each line is prefixed with a row counter and the level; `metadata` is
+  appended as the last argument.
+- `getLogger(ctx, optional?)`, `setLogger(ctx, logger)`, `removeLogger(ctx)` —
+  context adapter.
+- `getProcessId(ctx)` — random ID stored on the context, used as `processId`
+  metadata.
+- `newStateTracer(level = "info")` — returns `async (ctx) => close`; see
+  below.
+
 ## Internals
 
 ### Levels
@@ -77,11 +97,14 @@ browser console has no separate fatal channel.
 
 ### Adapter contract
 
-`getLogger` / `setLogger` come from `@statewalker/shared-adapters`. The
-factory reads `process.env.LOG_LEVEL` to set the initial level, and
-auto-binds a `processId` to the context for cross-log correlation. Replace
-it end-to-end by calling `setLogger(ctx, …)` before any other code calls
-`getLogger`.
+`getLogger` / `setLogger` / `removeLogger` are built with `newAdapter` from
+`@statewalker/shared-adapters` under the key `app.logger`. They do not walk
+parent contexts. When no logger is set, `getLogger(ctx)` creates a console
+logger, sets its level from `process.env.LOG_LEVEL` (default `info`; the
+`process` lookup is guarded, so this also works in browsers), binds a
+`processId` stored on the context under `app.processId` (see
+`getProcessId`), and logs one `info` start-up line. To use another backend,
+call `setLogger(ctx, …)` before any code calls `getLogger`.
 
 ### State tracer format
 
@@ -92,12 +115,12 @@ and renders as a tree in any text viewer.
 
 ### Constraints
 
-- The default factory reads `process.env.LOG_LEVEL` once on the first
-  `getLogger(ctx)`. Subsequent env changes do not affect already-created
+- The default factory reads `process.env.LOG_LEVEL` when it creates the
+  logger for a context. Subsequent env changes do not affect already-created
   loggers; mutate `logger.level` directly to change level at runtime.
 - `Logger` is intentionally minimal — no log destinations, no formatting
-  configuration, no async drain. Backends with those concerns
-  (pino, OpenTelemetry) ship as separate packages.
+  configuration, no async drain. A pino backend ships separately as
+  [`@statewalker/shared-logger-pino`](../shared-logger-pino).
 
 ### Dependencies
 
@@ -105,4 +128,4 @@ and renders as a tree in any text viewer.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

@@ -9,8 +9,8 @@ Browser-compatible identifier utilities:
 - **Snowflake parsing** (`parseSnowflake` and friends) — decode current and
   legacy formats (Crockford base32, hex, decimal) back to their parts.
 - **Crockford base32 codec** (`crockfordEncode` / `crockfordDecode`).
-- **SHA-1 hashing** (`sha1Uuid` / `sha1Bytes`) — for deterministic
-  content-addressable identifiers.
+- **SHA-1 hashing** (`sha1Uuid` / `sha1Bytes`) — 40-character lowercase hex
+  digests for deterministic content-addressable identifiers.
 
 ## Why it exists
 
@@ -71,6 +71,33 @@ parseSnowflake("8194842620624998400"); // decimal
 parseSnowflake("1J9X4Z2P3K7M5");        // Crockford base32
 ```
 
+## Entry points
+
+One entry point, `@statewalker/shared-ids` (ESM, `dist/index.js` with
+types). No runtime dependencies. Uses only `BigInt`, `Date.now()` and the Web
+Crypto API, so it works in browsers, Node and workers.
+
+## API
+
+- `SnowflakeId` — `new SnowflakeId({ epoch?, workerId?, now? })`, then
+  `generate(): string` (13-character Crockford base32). Defaults: epoch
+  `1609459200000` (2021-01-01T00:00:00Z), `workerId` `1`, `now` `Date.now`.
+- `SnowflakeOptions`, `SnowflakeParts` (`{ timestamp, workerId, sequence }`) —
+  types.
+- `SNOWFLAKE_BASE32_LENGTH` — `13`.
+- `parseSnowflake(id)` — auto-detects the format (see below).
+- `parseSnowflakeBase32(id)`, `parseSnowflakeHex(id)`, `parseSnowflakeDec(id)`
+  — parse a known format.
+- `extractTime(id, epoch?)` — absolute timestamp (ms since the Unix epoch).
+- `snowflakeToHex(decimal)`, `snowflakeToDecimal(hex)` — convert between the
+  legacy formats.
+- `crockfordEncode(value: bigint, length)`, `crockfordDecode(str): bigint`.
+- `sha1Uuid(content: string): Promise<string>`,
+  `sha1Bytes(data: Uint8Array): Promise<string>`.
+
+Note that `parseSnowflake` returns `timestamp` relative to the epoch; use
+`extractTime` to get an absolute time.
+
 ## Internals
 
 ### Snowflake bit layout
@@ -91,8 +118,9 @@ parseSnowflake("1J9X4Z2P3K7M5");        // Crockford base32
 
 ### Why Crockford base32 instead of hex or base64?
 
-- **Lexicographic sort = numeric sort.** The alphabet `0-9A-V` (with `I`,
-  `L`, `O`, `U` removed) is in ASCII-ordinal order for the 32 ranks.
+- **Lexicographic sort = numeric sort.** The alphabet
+  `0123456789ABCDEFGHJKMNPQRSTVWXYZ` (`I`, `L`, `O`, `U` removed) is in
+  ASCII order for the 32 ranks.
   Sorting Crockford strings lexicographically produces the same order as
   sorting their decoded BigInt values.
 - **Visually unambiguous.** Omitting `I`, `L`, `O`, `U` removes the most
@@ -113,15 +141,15 @@ the caller still gets parsed parts.
 
 ### Constraints
 
-- `crypto.subtle.digest` is required for SHA-1 — available in modern
-  browsers and Node ≥ 16 in worker / module contexts.
+- SHA-1 uses the global `crypto.subtle.digest` — available in modern
+  browsers, workers and Node 24.
 - The sequence counter is per-`SnowflakeId` instance. Multiple processes
   must have distinct `workerId`s, or two co-running generators on the same
   ms can mint the same ID.
-- `parseSnowflakeHex` accepts an unpadded hex string. If you have a
-  zero-padded hex string of length 13 it will be parsed as Crockford
-  base32 — pass it through `parseSnowflakeHex` explicitly to force hex
-  interpretation.
+- `parseSnowflake` treats every 13-character string as Crockford base32,
+  and every string of 16 or fewer characters as hex. A 13-character hex ID,
+  or a decimal ID of 16 or fewer digits, must be passed to
+  `parseSnowflakeHex` / `parseSnowflakeDec` explicitly.
 
 ### Dependencies
 
@@ -129,4 +157,4 @@ Zero runtime dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

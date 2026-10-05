@@ -87,6 +87,22 @@ for await (const frame of gen) {
 }
 ```
 
+## Entry points
+
+One entry point, `@statewalker/shared-generators` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+## API
+
+- `newAsyncGenerator<T, E = Error>(init, skipValues = false): AsyncGenerator<T>`
+  — `init(next, done)` receives `next(value): Promise<boolean>` and
+  `done(error?): Promise<boolean>` and may return a cleanup function (sync or
+  async).
+- `newAsyncGeneratorFunction<T>(listen): () => AsyncGenerator<T>` — wraps
+  `newAsyncGenerator`; `listen(next)` gets only `next` and may return a sync
+  cleanup function. Each call of the returned function starts a new
+  generator.
+
 ## Internals
 
 ### Backpressure via promise-acked enqueue
@@ -128,4 +144,4 @@ Zero runtime dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).
