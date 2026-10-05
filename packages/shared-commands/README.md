@@ -1,13 +1,27 @@
 # @statewalker/shared-commands
 
-Typed command bus and command registries. A module declares a command
-(key, input and output schemas, dispatch policy, optional label / description /
-icon). Other modules listen for it on a `Commands` bus and callers dispatch it,
-without importing each other. `CommandsRegistry` keeps catalogs of declarations
-that can be composed, filtered and prefixed, for example to build UI menus or
-to expose commands as tools to an AI agent. Schemas can come from any
-[Standard Schema](https://standardschema.dev/) library (Zod, Valibot,
-ArkType, …); JSON Schema is derived from them on demand.
+## What it is
+
+A typed command bus and command registries. A module declares a command (key,
+input and output schemas, dispatch policy, optional label / description /
+icon). Other modules listen for it on a `Commands` bus, and callers dispatch
+it through the same bus. `CommandsRegistry` holds catalogs of declarations
+that can be composed, filtered and prefixed.
+
+## Why it exists
+
+Modules that cooperate should not have to import each other. A UI menu should
+not hard-code which module handles "save", and an AI agent's tool list should
+not depend on whether a tool is served locally or by a remote adapter. With
+this package the caller and the handler share only the declaration:
+
+- the **bus** decouples the caller from whoever handles the command, with a
+  dispatch policy that says what happens when nobody does;
+- the **declaration** carries [Standard Schema](https://standardschema.dev/)
+  input/output schemas (Zod, Valibot, ArkType, …) for validation and for
+  deriving JSON Schema, plus UX metadata for menus;
+- **registries** collect declarations from many sources into one view, for
+  menus, action bars, or tool lists handed to an AI model.
 
 ## How to use
 
@@ -38,7 +52,7 @@ The full DX is in [Examples](#examples). API surface at a glance:
 | Derive a registry | `CommandsRegistry.compose / .filter / .namespace` |
 | Discriminate failures | `e instanceof CommandError && e.kind` |
 
-## Entry points
+### Entry point and exports
 
 One entry point, `@statewalker/shared-commands` (ESM, `dist/index.js` with
 types). It runs in browsers, Node and workers. Runtime dependencies:
@@ -97,8 +111,12 @@ no schema-lib-specific helper packages, no Zod-as-contract.
 `Command.custom(key, policy)` for combinations beyond the three named presets:
 
 ```ts
+import { Command, passthrough } from "@statewalker/shared-commands";
+
 const X = Command.custom("x", { onNoHandlers: "wait", onAllObserveOnly: "reject" })
-  .input(s).output(s).build();
+  .input(passthrough<{ id: string }>())
+  .output(passthrough<boolean>())
+  .build();
 ```
 
 The `Command` namespace value coexists with the `Command<P, R>` type used by the
@@ -179,7 +197,7 @@ Surface (all static on the `CommandsRegistry` namespace):
 - **`CommandsRegistry.namespace(source, prefix)`** — returns copies of the declarations with `prefix` added to `key`. A copy dispatches under the prefixed key, so listeners must be registered for the prefixed declaration.
 - Plus methods on the instance: `list` / `get` / `onUpdate` (read), `set(...decls): this` / `remove(...keys): this` (mutable, variadic, chainable).
 
-The `CommandsRegistry` namespace value coexists with the `CommandsRegistry` interface type — same TypeScript trick as `Command` / `Command<P, R>` and `Commands`.
+The `CommandsRegistry` namespace value coexists with the `CommandsRegistry` interface type — same TypeScript trick as `Command` / `Command<P, R>`.
 
 ### Failure / edge path
 
@@ -204,6 +222,10 @@ try {
   }
 }
 ```
+
+The error `message` is `<kind>: <command key>`, for example
+`no-handlers: platform:pick-file`. `error.cause` holds the validator issues or
+the listener's error, and `error.commandKey` the key.
 
 Pending-forever is **not** a `CommandError` — `silent` commands with no handlers
 intentionally never resolve. Callers either don't `await` them, or guard with
@@ -250,6 +272,12 @@ ArkType, TypeBox, Effect Schema, Sury are supported by
 its `loadVendor` function.
 
 ### Constraints
+
+- Builder misuse throws at declaration time:
+  `Command "<key>": .input(...) and .output(...) must be called before .build()`,
+  and `Command "<key>": label already set` (same for `description`, `icon`).
+- Registering a different declaration under an existing key throws
+  `RangeError: CommandsRegistry: key "<key>" already registered with a different declaration`.
 
 - Listener-throw short-circuits dispatch. Observers registered after a
   buggy handler will not run if the handler throws or returns a rejecting

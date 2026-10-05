@@ -14,7 +14,7 @@ Browser-compatible identifier utilities:
 
 ## Why it exists
 
-The backbone needs identifiers that (a) sort the same lexicographically as
+Applications need identifiers that (a) sort the same lexicographically as
 chronologically (so a `SELECT … ORDER BY id` query returns rows in creation
 order), (b) survive copy-paste without ambiguity, and (c) work in the
 browser without polyfills. UUIDs sort poorly. Plain hex snowflakes have
@@ -40,44 +40,13 @@ const id = gen.generate(); // e.g. "1J9X4Z2P3K7M5"
 const { timestamp, workerId, sequence } = parseSnowflake(id);
 ```
 
-## Examples
-
-### Generating sortable IDs
-
-```ts
-const gen = new SnowflakeId();
-const a = gen.generate();
-const b = gen.generate();
-a < b; // true — lexicographic order matches generation order
-```
-
-### Deterministic content-addressable ID
-
-```ts
-import { sha1Uuid } from "@statewalker/shared-ids";
-
-const blockId = await sha1Uuid(JSON.stringify(payload));
-// → 40-char lowercase hex, identical for identical payloads
-```
-
-### Decoding legacy hex snowflake IDs
-
-```ts
-import { parseSnowflake } from "@statewalker/shared-ids";
-
-// Auto-detects format: 13-char → Crockford base32, otherwise hex / decimal
-parseSnowflake("3a1ff0e0000000");
-parseSnowflake("8194842620624998400"); // decimal
-parseSnowflake("1J9X4Z2P3K7M5");        // Crockford base32
-```
-
-## Entry points
+### Entry point
 
 One entry point, `@statewalker/shared-ids` (ESM, `dist/index.js` with
 types). No runtime dependencies. Uses only `BigInt`, `Date.now()` and the Web
 Crypto API, so it works in browsers, Node and workers.
 
-## API
+### API surface
 
 - `SnowflakeId` — `new SnowflakeId({ epoch?, workerId?, now? })`, then
   `generate(): string` (13-character Crockford base32). Defaults: epoch
@@ -97,6 +66,58 @@ Crypto API, so it works in browsers, Node and workers.
 
 Note that `parseSnowflake` returns `timestamp` relative to the epoch; use
 `extractTime` to get an absolute time.
+
+## Examples
+
+### Generating sortable IDs
+
+```ts
+import { SnowflakeId } from "@statewalker/shared-ids";
+
+const gen = new SnowflakeId();
+const a = gen.generate();
+const b = gen.generate();
+a < b; // true — lexicographic order matches generation order
+```
+
+### Deterministic content-addressable ID
+
+```ts
+import { sha1Uuid } from "@statewalker/shared-ids";
+
+const blockId = await sha1Uuid(JSON.stringify(payload));
+// → 40-char lowercase hex, identical for identical payloads
+```
+
+### Reading the creation time
+
+```ts
+import { extractTime, SnowflakeId } from "@statewalker/shared-ids";
+
+const id = new SnowflakeId().generate();
+new Date(extractTime(id)); // creation time; pass the epoch if you used a custom one
+```
+
+### Crockford base32 directly
+
+```ts
+import { crockfordDecode, crockfordEncode } from "@statewalker/shared-ids";
+
+crockfordEncode(12345n, 4); // "0C1S"
+crockfordDecode("0c1s"); // 12345n (case-insensitive; O -> 0, I/L -> 1)
+crockfordDecode("U"); // throws Error: Invalid Crockford base32 character: 'U'
+```
+
+### Decoding legacy hex snowflake IDs
+
+```ts
+import { parseSnowflake } from "@statewalker/shared-ids";
+
+// Auto-detects format: 13-char → Crockford base32, otherwise hex / decimal
+parseSnowflake("3a1ff0e0000000");
+parseSnowflake("8194842620624998400"); // decimal
+parseSnowflake("1J9X4Z2P3K7M5");        // Crockford base32
+```
 
 ## Internals
 
@@ -136,7 +157,7 @@ Note that `parseSnowflake` returns `timestamp` relative to the epoch; use
 - Contains `[a-f]` or ≤16 characters → hex (legacy `BigInt.toString(16)`).
 - Otherwise → decimal (`BigInt.toString()`).
 
-This lets one query return mixed-format IDs from a migrating store while
+This lets a store that holds IDs in several formats return them all, and
 the caller still gets parsed parts.
 
 ### Constraints
@@ -153,7 +174,7 @@ the caller still gets parsed parts.
 
 ### Dependencies
 
-Zero runtime dependencies.
+Zero dependencies.
 
 ## License
 

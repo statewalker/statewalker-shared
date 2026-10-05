@@ -34,6 +34,26 @@ log.info("starting up");
 log.error("bad thing", { code: 500 });
 ```
 
+### Entry point
+
+One entry point, `@statewalker/shared-logger` (ESM, `dist/index.js` with
+types). Works in browsers, Node and workers.
+
+### API surface
+
+- `Logger` — type with `level`, `trace`, `debug`, `info`, `warn`, `error`,
+  `fatal`, `child(metadata)`.
+- `LoggerLevel` — `"trace" | "debug" | "info" | "warn" | "error" | "fatal"`.
+- `newConsoleLogger(level = "info", metadata = {})` — console implementation.
+  Each line is prefixed with a row counter and the level; `metadata` is
+  appended as the last argument.
+- `getLogger(ctx, optional?)`, `setLogger(ctx, logger)`, `removeLogger(ctx)` —
+  context adapter.
+- `getProcessId(ctx)` — random ID stored on the context, used as `processId`
+  metadata.
+- `newStateTracer(level = "info")` — returns `async (ctx) => close`; see
+  below.
+
 ## Examples
 
 ### Inject a custom logger
@@ -62,26 +82,6 @@ const close = await trace(ctx);
 // … run state body …
 close();
 ```
-
-## Entry points
-
-One entry point, `@statewalker/shared-logger` (ESM, `dist/index.js` with
-types). Works in browsers, Node and workers.
-
-## API
-
-- `Logger` — type with `level`, `trace`, `debug`, `info`, `warn`, `error`,
-  `fatal`, `child(metadata)`.
-- `LoggerLevel` — `"trace" | "debug" | "info" | "warn" | "error" | "fatal"`.
-- `newConsoleLogger(level = "info", metadata = {})` — console implementation.
-  Each line is prefixed with a row counter and the level; `metadata` is
-  appended as the last argument.
-- `getLogger(ctx, optional?)`, `setLogger(ctx, logger)`, `removeLogger(ctx)` —
-  context adapter.
-- `getProcessId(ctx)` — random ID stored on the context, used as `processId`
-  metadata.
-- `newStateTracer(level = "info")` — returns `async (ctx) => close`; see
-  below.
 
 ## Internals
 
@@ -118,6 +118,9 @@ and renders as a tree in any text viewer.
 - The default factory reads `process.env.LOG_LEVEL` when it creates the
   logger for a context. Subsequent env changes do not affect already-created
   loggers; mutate `logger.level` directly to change level at runtime.
+- Setting `logger.level` on a console logger to an unknown name throws
+  `Error: Unknown log level: <name>`. An invalid `LOG_LEVEL` value reaches
+  the same setter, so `getLogger(ctx)` throws it on first use.
 - `Logger` is intentionally minimal — no log destinations, no formatting
   configuration, no async drain. A pino backend ships separately as
   [`@statewalker/shared-logger-pino`](../shared-logger-pino).

@@ -52,6 +52,22 @@ for await (const n of gen) {
 }
 ```
 
+### Entry point
+
+One entry point, `@statewalker/shared-generators` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+### API surface
+
+- `newAsyncGenerator<T, E = Error>(init, skipValues = false): AsyncGenerator<T>`
+  — `init(next, done)` receives `next(value): Promise<boolean>` and
+  `done(error?): Promise<boolean>` and may return a cleanup function (sync or
+  async).
+- `newAsyncGeneratorFunction<T>(listen): () => AsyncGenerator<T>` — wraps
+  `newAsyncGenerator`; `listen(next)` gets only `next` and may return a sync
+  cleanup function. Each call of the returned function starts a new
+  generator.
+
 ## Examples
 
 ### Reusable factory via `newAsyncGeneratorFunction`
@@ -87,22 +103,6 @@ for await (const frame of gen) {
 }
 ```
 
-## Entry points
-
-One entry point, `@statewalker/shared-generators` (ESM, `dist/index.js` with
-types). No runtime dependencies; works in browsers, Node and workers.
-
-## API
-
-- `newAsyncGenerator<T, E = Error>(init, skipValues = false): AsyncGenerator<T>`
-  — `init(next, done)` receives `next(value): Promise<boolean>` and
-  `done(error?): Promise<boolean>` and may return a cleanup function (sync or
-  async).
-- `newAsyncGeneratorFunction<T>(listen): () => AsyncGenerator<T>` — wraps
-  `newAsyncGenerator`; `listen(next)` gets only `next` and may return a sync
-  cleanup function. Each call of the returned function starts a new
-  generator.
-
 ## Internals
 
 ### Backpressure via promise-acked enqueue
@@ -132,6 +132,9 @@ drained (resolving with `false`) at the same point.
 
 - Generators are single-consumer. Pulling from the same generator instance
   twice concurrently is undefined behaviour.
+- A producer that never calls `done()` keeps the consumer's `for await`
+  waiting forever. Only the consumer (`break`, `return()`) or `done()` ends
+  the loop.
 - `done(error)` causes the generator to throw the supplied error to the
   consumer. With no error, it completes normally.
 - `newAsyncGeneratorFunction` exposes only the `next` callback to its
@@ -140,7 +143,7 @@ drained (resolving with `false`) at the same point.
 
 ### Dependencies
 
-Zero runtime dependencies.
+Zero dependencies.
 
 ## License
 

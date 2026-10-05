@@ -47,7 +47,31 @@ export const coreViewsSlot =
   defineKeyedSlot<ViewComponent>("core:views");
 ```
 
-### Plain-slot operations
+### Entry point
+
+One entry point, `@statewalker/shared-slots` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
+`SlotDeclaration` and `KeyedSlotDeclaration`.
+
+### API surface
+
+- `defineSlot<T>(key)` — returns a frozen `SlotDeclaration<T>`.
+- `defineKeyedSlot<T>(key)` — returns a frozen `KeyedSlotDeclaration<T>`.
+- `Slots` — the bus class:
+  - `provide(decl, value): () => void` (plain)
+  - `observe(decl, cb): () => void` (overloaded for plain and keyed)
+  - `getSnapshot(decl)` — `readonly T[]` for plain slots (frozen),
+    `ReadonlyMap<string, T>` for keyed slots; reference-stable until the next
+    change
+  - `register(decl, id, value): () => void` (keyed; collision-throws)
+  - `get(decl, id): T | null` (keyed)
+
+## Examples
+
+The snippets below use the declarations from "Declare slots".
+
+### Plain slot: rank contributions
 
 ```ts
 const slots = new Slots();
@@ -68,7 +92,7 @@ const best = renderers
 const off = slots.observe(mimeRenderersSlot, (rs) => { /* … */ });
 ```
 
-### Keyed-slot operations
+### Keyed slot: look up by id
 
 ```ts
 // Register:
@@ -80,13 +104,6 @@ const View = slots.get(coreViewsSlot, "chat:turn-block:tool-call");
 // Observe a ReadonlyMap<string, T>:
 const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
 ```
-
-## Entry points
-
-One entry point, `@statewalker/shared-slots` (ESM, `dist/index.js` with
-types). No runtime dependencies; works in browsers, Node and workers.
-Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
-`SlotDeclaration` and `KeyedSlotDeclaration`.
 
 ## Internals
 
@@ -106,7 +123,8 @@ Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
 ### Keyed slots
 
 - **Collision-throw.** Registering two *different* values under the same
-  id throws `RangeError` synchronously.
+  id throws synchronously:
+  `RangeError: Slots.register: id "<id>" is already registered with a different value (slotKey="<key>")`.
 - **Ref-counted re-register.** Registering the *same* value reference
   under the same id is a ref-counted no-op (the entry survives until
   every disposer fires).
@@ -141,20 +159,7 @@ without touching either the module or the host.
 
 ### Dependencies
 
-Zero runtime dependencies.
-
-## API
-
-- `defineSlot<T>(key)` — returns a frozen `SlotDeclaration<T>`.
-- `defineKeyedSlot<T>(key)` — returns a frozen `KeyedSlotDeclaration<T>`.
-- `Slots` — the bus class:
-  - `provide(decl, value): () => void` (plain)
-  - `observe(decl, cb): () => void` (overloaded for plain and keyed)
-  - `getSnapshot(decl)` — `readonly T[]` for plain slots (frozen),
-    `ReadonlyMap<string, T>` for keyed slots; reference-stable until the next
-    change
-  - `register(decl, id, value): () => void` (keyed; collision-throws)
-  - `get(decl, id): T | null` (keyed)
+Zero dependencies.
 
 ## License
 

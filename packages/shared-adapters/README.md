@@ -44,6 +44,25 @@ const log = getLogger(ctx); // factory runs once, value cached on ctx
 log.info("hello");
 ```
 
+### Entry point
+
+One entry point, `@statewalker/shared-adapters` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+### API surface
+
+- `newAdapter<T, P>(key, create?, getParent?)` returns
+  `[get, set, remove]`.
+  - `get(context, optional?)` looks the value up (walking parents), creates it
+    with `create` if missing, and throws `Adapter not found: <key>` when there
+    is still no value and `optional` is not `true`.
+  - `set(context, value)` stores the value on the context.
+  - `remove(context)` deletes the key from the context.
+  - `getParent` defaults to `context.parent`.
+- `getAdapter<T, O>(key, create, getParent?)` returns `[get, remove]`.
+  `create` is required, and `getParent` defaults to "no parent" (no
+  inheritance), unlike `newAdapter`.
+
 ## Examples
 
 ### Read-only adapter that throws when unset
@@ -89,26 +108,20 @@ getTheme(child); // → "dark" (inherited from root)
 ```ts
 const [getLogger] = newAdapter<Logger>("app:logger");
 const maybe = getLogger(ctx, true); // returns undefined instead of throwing
+getLogger(ctx); // throws Error: Adapter not found: app:logger
 ```
 
-## Entry points
+### Get-or-create without a setter: `getAdapter`
 
-One entry point, `@statewalker/shared-adapters` (ESM, `dist/index.js` with
-types). No runtime dependencies; works in browsers, Node and workers.
+```ts
+import { getAdapter } from "@statewalker/shared-adapters";
 
-## API
+const [getCache, removeCache] = getAdapter("app:cache", () => new Map<string, string>());
 
-- `newAdapter<T, P>(key, create?, getParent?)` returns
-  `[get, set, remove]`.
-  - `get(context, optional?)` looks the value up (walking parents), creates it
-    with `create` if missing, and throws `Adapter not found: <key>` when there
-    is still no value and `optional` is not `true`.
-  - `set(context, value)` stores the value on the context.
-  - `remove(context)` deletes the key from the context.
-  - `getParent` defaults to `context.parent`.
-- `getAdapter<T, O>(key, create, getParent?)` returns `[get, remove]`.
-  `create` is required, and `getParent` defaults to "no parent" (no
-  inheritance), unlike `newAdapter`.
+const ctx = {};
+getCache(ctx).set("a", "1"); // created on first call, then cached on ctx
+removeCache(ctx); // the next getCache(ctx) creates a fresh Map
+```
 
 ## Internals
 
@@ -131,6 +144,11 @@ throws — unless called with `optional = true`, in which case it returns
 
 ### Constraints
 
+- A missing value without a factory throws `Error: Adapter not found: <key>`.
+  Pass `optional = true` to get `undefined` instead.
+- A value of `undefined` counts as missing: storing `undefined` with `set`
+  makes `get` keep searching the parents (and then throw or create).
+
 - Adapter keys are flat strings. Use `domain:name` (e.g. `app:logger`,
   `api:files`) to avoid collisions when many fragments share one context.
 - The context must be a non-null, writable object. On primitives `set` and
@@ -138,7 +156,7 @@ throws — unless called with `optional = true`, in which case it returns
 
 ### Dependencies
 
-Zero runtime dependencies.
+Zero dependencies.
 
 ## License
 

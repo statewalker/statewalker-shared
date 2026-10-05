@@ -46,6 +46,27 @@ c.increment();
 off();
 ```
 
+### Entry point
+
+One entry point, `@statewalker/shared-baseclass` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+### API surface
+
+- `BaseClass` — `onUpdate(cb): () => void` (an arrow property, so it can be
+  passed around unbound), `notify()`, `toJSON()`, `fromJSON(obj): this`.
+- `onChange(onUpdate, callback, getValue): () => void` — call `callback` only
+  when `getValue()` changes (strict equality).
+- `onChangeNotifier(onUpdate, getValue)` — same, returned as a reusable
+  `(callback) => unsubscribe` function.
+- `waitFor(onUpdate, check): Promise<void>` — resolve once `check()` is true.
+- `waitForValue(onUpdate, get): Promise<T>` — resolve with the first
+  non-`undefined` value of `get()`.
+- `waitForSettled(model): Promise<model>` — `waitFor` on `model.isSettled()`;
+  the model must match the exported `Settleable` interface.
+- `readValues(onUpdate, read): AsyncGenerator<T>` — yield every
+  non-`undefined` value of `read()`, re-reading after each update.
+
 ## Examples
 
 ### Reacting only to actual changes
@@ -107,6 +128,28 @@ for await (const v of iter) {
 }
 ```
 
+### Waiting for a condition or a settled model
+
+```ts
+import { BaseClass, waitFor, waitForSettled } from "@statewalker/shared-baseclass";
+
+class Job extends BaseClass {
+  done = false;
+  isSettled(): boolean {
+    return this.done;
+  }
+}
+
+const job = new Job();
+setTimeout(() => {
+  job.done = true;
+  job.notify();
+}, 10);
+
+await waitFor(job.onUpdate, () => job.done); // resolves once done is true
+await waitForSettled(job); // same, through the isSettled() convention
+```
+
 ### JSON round-trip
 
 ```ts
@@ -120,27 +163,6 @@ m.toJSON();   // { name: "alice", score: 0 } — drops underscore-prefixed field
 m.fromJSON({ score: 5 }); // mutates and notifies if any property actually changed
 ```
 
-## Entry points
-
-One entry point, `@statewalker/shared-baseclass` (ESM, `dist/index.js` with
-types). No runtime dependencies; works in browsers, Node and workers.
-
-## API
-
-- `BaseClass` — `onUpdate(cb): () => void` (an arrow property, so it can be
-  passed around unbound), `notify()`, `toJSON()`, `fromJSON(obj): this`.
-- `onChange(onUpdate, callback, getValue): () => void` — call `callback` only
-  when `getValue()` changes (strict equality).
-- `onChangeNotifier(onUpdate, getValue)` — same, returned as a reusable
-  `(callback) => unsubscribe` function.
-- `waitFor(onUpdate, check): Promise<void>` — resolve once `check()` is true.
-- `waitForValue(onUpdate, get): Promise<T>` — resolve with the first
-  non-`undefined` value of `get()`.
-- `waitForSettled(model): Promise<model>` — `waitFor` on `model.isSettled()`;
-  the model must match the exported `Settleable` interface.
-- `readValues(onUpdate, read): AsyncGenerator<T>` — yield every
-  non-`undefined` value of `read()`, re-reading after each update.
-
 ## Internals
 
 ### Notification model
@@ -151,15 +173,15 @@ same function reference is a Set-dedup no-op. `notify()` does not pass a
 "changed key" — it is a fire-and-forget pulse, and derivers use
 `onChange`/`waitFor` to extract semantic change information.
 
-### Why not a Proxy?
+### Why changes are signalled explicitly, not with a Proxy
 
-Earlier iterations used a Proxy to auto-notify on property assignment, but
-the per-access cost and "what counts as a change?" subtlety (deep equality?
-array length writes? Symbol keys?) made it more trouble than it saved.
-Callers now explicitly call `notify()` after mutating state — one extra line
-in mutator methods, in exchange for predictable change semantics. The
-`fromJSON` helper batches notifications: it diffs each key with strict
-equality and notifies only once at the end if anything actually changed.
+Property assignment does not notify. Callers call `notify()` after
+mutating state. An auto-notifying Proxy would add a cost to every property
+access and would have to decide what counts as a change (deep equality,
+array length writes, Symbol keys). An explicit `notify()` costs one line per
+mutator and gives predictable change semantics. `fromJSON` follows the same
+rule: it diffs each key with strict equality and notifies once at the end,
+only if something changed.
 
 ### `toJSON` / `fromJSON` conventions
 
@@ -170,6 +192,11 @@ changes, `notify()` is not called.
 
 ### Constraints
 
+- Forgetting `notify()` after a mutation is silent: listeners, `waitFor`
+  promises and `readValues` loops simply do not see the change.
+- `waitFor` / `waitForValue` / `waitForSettled` have no timeout; if the
+  condition never becomes true, the promise never settles.
+
 - No deep observability — only the top-level `notify()` pulse.
 - Listeners run synchronously; an exception in one listener throws into the
   caller of `notify()`. Catch in the listener if needed.
@@ -179,7 +206,7 @@ changes, `notify()` is not called.
 
 ### Dependencies
 
-Zero runtime dependencies.
+Zero dependencies.
 
 ## License
 
