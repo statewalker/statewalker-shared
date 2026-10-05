@@ -1,5 +1,15 @@
 # @statewalker/shared-logger
 
+## 0.1.4
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: README.md
+- Updated dependencies
+  - @statewalker/shared-adapters@0.1.3
+
 ## 0.1.1
 
 ### Patch Changes
