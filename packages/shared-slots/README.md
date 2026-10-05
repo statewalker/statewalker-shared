@@ -47,7 +47,31 @@ export const coreViewsSlot =
   defineKeyedSlot<ViewComponent>("core:views");
 ```
 
-### Plain-slot operations
+### Entry point
+
+One entry point, `@statewalker/shared-slots` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
+`SlotDeclaration` and `KeyedSlotDeclaration`.
+
+### API surface
+
+- `defineSlot<T>(key)` — returns a frozen `SlotDeclaration<T>`.
+- `defineKeyedSlot<T>(key)` — returns a frozen `KeyedSlotDeclaration<T>`.
+- `Slots` — the bus class:
+  - `provide(decl, value): () => void` (plain)
+  - `observe(decl, cb): () => void` (overloaded for plain and keyed)
+  - `getSnapshot(decl)` — `readonly T[]` for plain slots (frozen),
+    `ReadonlyMap<string, T>` for keyed slots; reference-stable until the next
+    change
+  - `register(decl, id, value): () => void` (keyed; collision-throws)
+  - `get(decl, id): T | null` (keyed)
+
+## Examples
+
+The snippets below use the declarations from "Declare slots".
+
+### Plain slot: rank contributions
 
 ```ts
 const slots = new Slots();
@@ -68,7 +92,7 @@ const best = renderers
 const off = slots.observe(mimeRenderersSlot, (rs) => { /* … */ });
 ```
 
-### Keyed-slot operations
+### Keyed slot: look up by id
 
 ```ts
 // Register:
@@ -81,29 +105,26 @@ const View = slots.get(coreViewsSlot, "chat:turn-block:tool-call");
 const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
 ```
 
-## Examples
-
-See the snippets above — the plain-slot path covers ranked contribution
-selection, and the keyed-slot path covers id-addressable component
-registries.
-
 ## Internals
 
 ### Plain slots
 
 - **Reference identity.** Values stored in a `Set`, deduped by reference.
   Providing the same object twice = one entry. Two structurally-equal
-  distinct objects = two entries.
+  distinct objects = two entries. Plain entries are not ref-counted: if the
+  same object was provided twice, the first disposer call removes it.
 - **Snapshot stability.** `getSnapshot(decl)` returns a frozen array,
   reference-stable until the next mutation. Safe to feed straight into
   `useSyncExternalStore` consumers.
-- **Observe.** Callback fires once synchronously with the current
-  snapshot, then synchronously on every mutation.
+- **Observe.** Callback fires once synchronously with the current values,
+  then synchronously on every mutation. It receives a new array each time
+  (not the cached `getSnapshot` array).
 
 ### Keyed slots
 
 - **Collision-throw.** Registering two *different* values under the same
-  id throws `RangeError` synchronously.
+  id throws synchronously:
+  `RangeError: Slots.register: id "<id>" is already registered with a different value (slotKey="<key>")`.
 - **Ref-counted re-register.** Registering the *same* value reference
   under the same id is a ref-counted no-op (the entry survives until
   every disposer fires).
@@ -138,19 +159,8 @@ without touching either the module or the host.
 
 ### Dependencies
 
-Zero runtime dependencies.
-
-## API
-
-- `defineSlot<T>(key)` — returns a frozen `SlotDeclaration<T>`.
-- `defineKeyedSlot<T>(key)` — returns a frozen `KeyedSlotDeclaration<T>`.
-- `Slots` — the bus class:
-  - `provide(decl, value): () => void` (plain)
-  - `observe(decl, cb): () => void` (overloaded for plain and keyed)
-  - `getSnapshot(decl): readonly T[]` (plain only)
-  - `register(decl, id, value): () => void` (keyed; collision-throws)
-  - `get(decl, id): T | null` (keyed)
+Zero dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

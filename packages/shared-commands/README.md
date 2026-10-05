@@ -2,38 +2,26 @@
 
 ## What it is
 
-Typed command bus **and** reactive command registry — one package providing
-both the dispatch substrate (bus, declarations, dispatch policies) and the
-catalog substrate (registries, composition primitives) used for cross-fragment
-late binding, AI-agent tool projection, and UI menu / action composition.
+A typed command bus and command registries. A module declares a command (key,
+input and output schemas, dispatch policy, optional label / description /
+icon). Other modules listen for it on a `Commands` bus, and callers dispatch
+it through the same bus. `CommandsRegistry` holds catalogs of declarations
+that can be composed, filtered and prefixed.
 
 ## Why it exists
 
-Late binding is a recurring need across the monorepo. Fragments shouldn't have
-to import each other to talk; UI menus shouldn't hard-code which fragment
-handles "save"; AI agents shouldn't know whether a file-read came from a local
-handler, an MCP server, or a remote gRPC service.
+Modules that cooperate should not have to import each other. A UI menu should
+not hard-code which module handles "save", and an AI agent's tool list should
+not depend on whether a tool is served locally or by a remote adapter. With
+this package the caller and the handler share only the declaration:
 
-**v1** scoped this to one workspace's fragments — a typed RPC bus with
-first-claim-wins listeners. Useful but narrow.
-
-**v2** extends the same substrate to be a universal:
-
-- **Tool surface for AI agents.** Each Command projects to a Vercel AI SDK
-  tool via one generic bridge (`ai-agent` owns the bridge; this package owns
-  everything upstream).
-- **Mount point for external APIs.** MCP servers, OpenAPI / gRPC / GraphQL
-  services are brought into the bus by adapter packages — every external
-  protocol's tools become Commands; consumers see no protocol-specific code.
-- **Action library for UI.** Menus, action bars, keyboard shortcuts pull from
-  a `CommandsRegistry`; the same `Command` declaration carries the schema
-  (for invocation) and the UX metadata (`label` / `icon` / i18n key).
-
-A single registry composition mechanism plus a single dispatch mechanism
-replace what would otherwise be one bridge per protocol times one ergonomic
-shim per consumer. Capability filtering, observation wrappers, and
-hierarchical delegation drop in as alternative `Commands` and
-`CommandsRegistry` factories without changing this contract.
+- the **bus** decouples the caller from whoever handles the command, with a
+  dispatch policy that says what happens when nobody does;
+- the **declaration** carries [Standard Schema](https://standardschema.dev/)
+  input/output schemas (Zod, Valibot, ArkType, …) for validation and for
+  deriving JSON Schema, plus UX metadata for menus;
+- **registries** collect declarations from many sources into one view, for
+  menus, action bars, or tool lists handed to an AI model.
 
 ## How to use
 
@@ -64,6 +52,28 @@ The full DX is in [Examples](#examples). API surface at a glance:
 | Derive a registry | `CommandsRegistry.compose / .filter / .namespace` |
 | Discriminate failures | `e instanceof CommandError && e.kind` |
 
+### Entry point and exports
+
+One entry point, `@statewalker/shared-commands` (ESM, `dist/index.js` with
+types). It runs in browsers, Node and workers. Runtime dependencies:
+`@standard-community/standard-json` and `@standard-schema/spec`. Install the
+schema library you use (for example `zod`) yourself.
+
+Exports:
+
+- `Command` — declaration builder (`required` / `async` / `silent` /
+  `custom`); also the `Command<P, R>` type of a dispatched command.
+- `Commands` — the bus class (`Commands.create()` or `new Commands()`).
+- `CommandsRegistry` — registry factories; also the read-only registry
+  interface. `MutableCommandsRegistry` — type of `CommandsRegistry.create()`.
+- `CommandError`, `CommandErrorKind`, `CommandErrorOptions`.
+- `REQUIRED`, `ASYNC`, `SILENT` — the preset `DispatchPolicy` objects;
+  `DispatchPolicy` type.
+- `passthrough<T>()` — a Standard Schema that accepts any value as `T`
+  without validation.
+- Types: `CommandDeclaration`, `CommandListener`, and the builder stages
+  `PolicyChosen`, `InputSet`, `Buildable`.
+
 ## Examples
 
 ### Declare a command
@@ -88,20 +98,25 @@ runs through four phases:
 2. **Input** — `.input(schema)` accepts any [Standard Schema](https://standardschema.dev/)–compliant
    library (Zod, Valibot, ArkType, TypeBox, …). Types are inferred from the schema.
 3. **Output** — `.output(schema)`. Same.
-4. **Optional UX metadata** — `.label` / `.description` / `.icon`, any order.
+4. **Optional UX metadata** — `.label` / `.description` / `.icon`, any order,
+   each at most once (a second call throws).
 
 JSON Schema is derived from the Standard Schemas via
 [`@standard-community/standard-json`](https://github.com/standard-community/standard-json) —
 no schema-lib-specific helper packages, no Zod-as-contract.
 
-`.label` / `.description` are i18n fallbacks; the i18n layer overrides them via
-`command.{key}.label` / `command.{key}.description`.
+`.build()` throws if `.input` or `.output` was not called. Use
+`passthrough<T>()` as a schema when you want types without runtime validation.
 
 `Command.custom(key, policy)` for combinations beyond the three named presets:
 
 ```ts
+import { Command, passthrough } from "@statewalker/shared-commands";
+
 const X = Command.custom("x", { onNoHandlers: "wait", onAllObserveOnly: "reject" })
-  .input(s).output(s).build();
+  .input(passthrough<{ id: string }>())
+  .output(passthrough<boolean>())
+  .build();
 ```
 
 The `Command` namespace value coexists with the `Command<P, R>` type used by the
@@ -123,12 +138,7 @@ commands.listen(PickFileCommand, async (cmd) => {
 const { blobs } = await commands.call(PickFileCommand, { multiple: true }).promise;
 ```
 
-`Commands.create()` is the single factory for the reference implementation.
-Future alternative implementations (composites, hierarchical with parent
-delegation, observation wrappers, capability-filtered) are exposed as their own
-static factories on the `Commands` namespace (`Commands.composed(...)`,
-`Commands.filtered(parent, predicate)`, …) without changing the `Commands`
-interface or this consumer-side ergonomics.
+`Commands` is a class; `Commands.create()` is equivalent to `new Commands()`.
 
 A listener returns one of:
 
@@ -148,10 +158,11 @@ commands.listen(decl, fallback, { priority: -1 });   // late — fires after all
 ```
 
 **Validation** runs at the bus boundary: `payload` is validated against
-`inputSchema` before any listener sees the command (failure → call rejects,
-no listener invoked). Each `cmd.resolve(value)` is validated against
-`outputSchema` (failure → call rejects with `CommandError("output-validation")`,
-the offending listener is reported).
+`inputSchema` before any listener sees the command (failure → call rejects
+with `CommandError("input-validation")`, no listener invoked). Each `cmd.resolve(value)` is validated against
+`outputSchema` (failure → call rejects with `CommandError("output-validation")`;
+when the value came from a listener's returned promise, `error.listener` is
+that listener).
 
 ### Registries
 
@@ -183,10 +194,10 @@ Surface (all static on the `CommandsRegistry` namespace):
 - **`CommandsRegistry.create(...decls?)`** — fresh `MutableCommandsRegistry`, optionally seeded.
 - **`CommandsRegistry.compose(...sources)`** — read-only union: `list()` concatenates, `get()` first-match wins, `onUpdate` fans out.
 - **`CommandsRegistry.filter(source, predicate)`** — predicate-filtered read-only view.
-- **`CommandsRegistry.namespace(source, prefix)`** — wraps each declaration's `key` with the prefix.
+- **`CommandsRegistry.namespace(source, prefix)`** — returns copies of the declarations with `prefix` added to `key`. A copy dispatches under the prefixed key, so listeners must be registered for the prefixed declaration.
 - Plus methods on the instance: `list` / `get` / `onUpdate` (read), `set(...decls): this` / `remove(...keys): this` (mutable, variadic, chainable).
 
-The `CommandsRegistry` namespace value coexists with the `CommandsRegistry` interface type — same TypeScript trick as `Command` / `Command<P, R>` and `Commands`.
+The `CommandsRegistry` namespace value coexists with the `CommandsRegistry` interface type — same TypeScript trick as `Command` / `Command<P, R>`.
 
 ### Failure / edge path
 
@@ -212,6 +223,10 @@ try {
 }
 ```
 
+The error `message` is `<kind>: <command key>`, for example
+`no-handlers: platform:pick-file`. `error.cause` holds the validator issues or
+the listener's error, and `error.commandKey` the key.
+
 Pending-forever is **not** a `CommandError` — `silent` commands with no handlers
 intentionally never resolve. Callers either don't `await` them, or guard with
 `Promise.race` and a timeout.
@@ -235,13 +250,15 @@ synchronously, but its `promise` settles later.
 
 Output validation runs on every `cmd.resolve(value)` — both
 listener-returned Promise resolves and explicit `cmd.resolve` calls from
-inside listeners. Settled-guard ensures only the first valid resolve wins.
+inside listeners. The first `resolve` or `reject` settles the command; a
+`resolve` with an invalid value settles it as a rejection.
 
 `CommandsRegistry.create(...)` holds a `Map<string, CommandDeclaration>` and
 a `Set<() => void>` of `onUpdate` subscribers. Variadic `.set(...)` is
 atomic: keys are pre-checked for collision (different reference under same
 key) before any entry is added; on collision a `RangeError` is thrown and
-the map is unchanged. Idempotent re-registration (same reference) is a
+the map is unchanged. Duplicate keys inside one `.set(...)` call are not
+checked against each other: the first declaration is kept. Idempotent re-registration (same reference) is a
 no-op (no `onUpdate` fire). Composed / filtered / namespaced views hold no
 state — subscribers and lookups delegate to the underlying source(s).
 
@@ -250,10 +267,17 @@ JSON Schema (`inputJsonSchema` / `outputJsonSchema`) is exposed as a lazy
 read triggers async vendor loading inside
 `@standard-community/standard-json`; subsequent reads return the cached
 Promise. This keeps the substrate validator-agnostic — Zod, Valibot,
-ArkType, TypeBox, Effect Schema, Sury are all supported out of the box;
-custom validators register via `loadVendor` from the bridge package.
+ArkType, TypeBox, Effect Schema, Sury are supported by
+`@standard-community/standard-json`; other validators can be registered with
+its `loadVendor` function.
 
 ### Constraints
+
+- Builder misuse throws at declaration time:
+  `Command "<key>": .input(...) and .output(...) must be called before .build()`,
+  and `Command "<key>": label already set` (same for `description`, `icon`).
+- Registering a different declaration under an existing key throws
+  `RangeError: CommandsRegistry: key "<key>" already registered with a different declaration`.
 
 - Listener-throw short-circuits dispatch. Observers registered after a
   buggy handler will not run if the handler throws or returns a rejecting
@@ -283,4 +307,4 @@ custom validators register via `loadVendor` from the bridge package.
 
 ## License
 
-MIT © statewalker
+MIT. See the monorepo root [LICENSE](../../LICENSE).

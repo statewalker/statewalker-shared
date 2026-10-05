@@ -44,9 +44,23 @@ await disposeA();
 await cleanup();
 ```
 
+### Entry point
+
+One entry point, `@statewalker/shared-registry` (ESM, `dist/index.js` with
+types). No runtime dependencies; works in browsers, Node and workers.
+
+### API surface
+
+- `newRegistry<E = unknown>(onError = console.error)` returns
+  `[register, cleanup]`.
+  - `register(callback?): () => Promise<void>` — adds a callback and returns
+    its disposer. The disposer runs the callback at most once.
+  - `cleanup(): Promise<void>` — runs all remaining callbacks, newest first,
+    one after another.
+
 ## Examples
 
-### Workspace teardown
+### Service teardown
 
 ```ts
 const [register, cleanup] = newRegistry((e) => log.error("cleanup failed", e));
@@ -105,8 +119,8 @@ the next listener runs.
 
 ### Dependencies
 
-Zero runtime dependencies.
+Zero dependencies.
 
 ## License
 
-MIT — see the monorepo root `LICENSE`.
+MIT. See the monorepo root [LICENSE](../../LICENSE).

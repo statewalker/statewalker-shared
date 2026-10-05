@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.16.1",
-  "description": "Foundation layer for the statewalker ecosystem: shared primitives, adapters, logger, registry, intents, ids",
+  "description": "Foundation layer for the statewalker ecosystem: adapters, base class, generators, registry, logger, ids, commands, slots",
   "bugs": {
     "url": "https://github.com/statewalker/statewalker-shared/issues"
   },
