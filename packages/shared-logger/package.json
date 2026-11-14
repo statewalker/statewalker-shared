@@ -3,7 +3,7 @@
   "version": "0.1.4",
   "private": false,
   "type": "module",
-  "description": "Logger interface and stdout-backed implementation.",
+  "description": "Logger interface and console-backed implementation.",
   "bugs": {
     "url": "https://github.com/statewalker/statewalker-shared/issues"
   },

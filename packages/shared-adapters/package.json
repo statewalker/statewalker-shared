@@ -3,7 +3,7 @@
   "version": "0.1.3",
   "private": false,
   "type": "module",
-  "description": "Adapter registration helpers (newAdapter, newRegistry) for discoverable service interfaces.",
+  "description": "Typed get/set/remove helpers (newAdapter, getAdapter) for values stored on plain context objects.",
   "bugs": {
     "url": "https://github.com/statewalker/statewalker-shared/issues"
   },

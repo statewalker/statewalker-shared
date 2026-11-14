@@ -93,7 +93,7 @@ describe("lexicographic ordering", () => {
       encoded.push(crockfordEncode(i, 13));
     }
     for (let i = 1; i < encoded.length; i++) {
-      expect(encoded[i - 1]! < encoded[i]!).toBe(true);
+      expect((encoded[i - 1] ?? "") < (encoded[i] ?? "")).toBe(true);
     }
   });
 });
