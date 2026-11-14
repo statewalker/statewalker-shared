@@ -88,13 +88,3 @@ export const [getLogger, setLogger, removeLogger] = newAdapter<Logger, Record<st
   },
   () => undefined,
 );
-
-// export function getLogger(context: Record<string, unknown>): Logger {
-//   const stack = (context['fsm:states'] || []) as string[];
-//   const event = (context['fsm:event'] ?? '') as string;
-//   return getRootLogger(context).child({
-//     processId: getProcessId(context),
-//     stack,
-//     event,
-//   });
-// }

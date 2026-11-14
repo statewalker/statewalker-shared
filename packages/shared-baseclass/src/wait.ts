@@ -3,9 +3,8 @@
  *
  * @param onUpdate A function that registers a callback to be called whenever the object updates. It returns a cleanup function to unregister the callback.
  * @param get A function that returns a value or undefined.
- * @returns An the value returned by the get method
+ * @returns The value returned by the get method
  */
-
 export function waitForValue<T>(
   onUpdate: (callback: () => void) => () => void,
   get: () => undefined | T,
@@ -24,13 +23,12 @@ export function waitForValue<T>(
 }
 
 /**
- * Utility function transforming a sync callback notification to promise of a value returned by the given get method.
+ * Utility function transforming a sync callback notification to a promise that resolves once the given check passes.
  *
  * @param onUpdate A function that registers a callback to be called whenever the object updates. It returns a cleanup function to unregister the callback.
- * @param get A function that returns a value or undefined.
- * @returns An the value returned by the get method
+ * @param check A function that returns true once the awaited condition holds.
+ * @returns A promise resolved (with no value) when `check` returns true
  */
-
 export function waitFor(
   onUpdate: (callback: () => void) => () => void,
   check: () => boolean,

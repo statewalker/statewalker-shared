@@ -40,7 +40,7 @@ export class Slots {
   private readonly _plainWatchers = new Map<string, Set<(values: unknown[]) => void>>();
   private readonly _plainSnapshots = new Map<string, readonly unknown[]>();
 
-  // Keyed-slot storage. The bus owns the index and version counter
+  // Keyed-slot storage. The bus owns the index and snapshot cache
   // per key, shared across all consumers of the same keyed slot.
   private readonly _keyedEntries = new Map<string, Map<string, KeyedEntry<unknown>>>();
   private readonly _keyedWatchers = new Map<
