@@ -1,3 +1,4 @@
+import { Notifier } from "@statewalker/shared-baseclass";
 import type { CommandDeclaration } from "./types.js";
 
 type AnyDeclaration = CommandDeclaration<unknown, unknown>;
@@ -23,7 +24,9 @@ export interface MutableCommandsRegistry extends CommandsRegistry {
 
 class MutableRegistry implements MutableCommandsRegistry {
   private readonly _map = new Map<string, AnyDeclaration>();
-  private readonly _subs = new Set<() => void>();
+  // Subscribing the same function twice keeps one subscription, as the Set
+  // this replaced did.
+  private readonly _subs = new Notifier({ dedupe: true });
 
   constructor(decls: AnyDeclaration[]) {
     for (const d of decls) {
@@ -46,13 +49,7 @@ class MutableRegistry implements MutableCommandsRegistry {
   }
 
   onUpdate(fn: () => void): () => void {
-    this._subs.add(fn);
-    let disposed = false;
-    return () => {
-      if (disposed) return;
-      disposed = true;
-      this._subs.delete(fn);
-    };
+    return this._subs.add(fn);
   }
 
   set(...decls: AnyDeclaration[]): this {
@@ -85,9 +82,7 @@ class MutableRegistry implements MutableCommandsRegistry {
   }
 
   private _notify(): void {
-    for (const fn of [...this._subs]) {
-      fn();
-    }
+    this._subs.notify();
   }
 }
 

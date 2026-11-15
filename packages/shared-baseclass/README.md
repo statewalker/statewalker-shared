@@ -71,7 +71,14 @@ types). No runtime dependencies; works in browsers, Node and workers.
 - `readValues(onUpdate, read): AsyncGenerator<T>` — yield every
   non-`undefined` value of `read()`, re-reading after each update. `break`,
   `return()` and `throw()` end it and unsubscribe, even while a `next()` is
-  waiting for an update (that `next()` resolves `{ done: true }`).
+  waiting for an update (that `next()` resolves `{ done: true }`). Built on
+  `newAsyncGenerator` from `@statewalker/shared-generators`, the one
+  callback-to-async bridge; use that directly for producers that push values.
+- `Notifier<T>` — the listener set `BaseClass`, the commands registry and
+  `Slots` build on: `add(fn): () => void`, `notify(value)`, `size`. Options:
+  `dedupe` (subscribe a function once) and `onError` (receive listener errors
+  instead of `notify` rethrowing them). See
+  [Notification model](#notification-model).
 
 ## Examples
 
@@ -174,11 +181,21 @@ m.fromJSON({ _internal: "x", notify: 1 }); // ignored: private field and method
 
 ### Notification model
 
-`BaseClass` holds a `Set<() => void>` of listeners. `notify()` iterates the
-set synchronously. Listener disposal removes from the set. Listeners are
-deduplicated by reference: re-registering the same function is a no-op, so two
-subscribers passing the same function share one entry and the first disposer
-removes it for both. Pass distinct functions (for example `() => cb()`) when
+`BaseClass` holds a `Notifier` (with `dedupe`), which owns the rules every
+listener set in statewalker-shared follows:
+
+- `notify()` calls the listeners synchronously, over a copy: a listener added
+  during a pass is first called by the next one, a listener removed during a
+  pass is not called by it;
+- a throwing listener does not stop the others; `notify()` rethrows once all
+  have run (the error itself, or an `AggregateError` when several threw);
+- a disposer removes only its own subscription, once: calling it again, or
+  after the same function was registered again, is a no-op;
+- every listener of a pass receives the same value.
+
+Listeners are deduplicated by reference: re-registering the same function is a
+no-op, so two subscribers passing the same function share one entry and the
+first disposer removes it for both. Pass distinct functions (for example `() => cb()`) when
 subscriptions must be independent. `notify()` does not pass a
 "changed key" — it is a fire-and-forget pulse, and derivers use
 `onChange`/`waitFor` to extract semantic change information.
@@ -212,8 +229,9 @@ changes, `notify()` is not called.
   condition never becomes true, the promise never settles.
 
 - No deep observability — only the top-level `notify()` pulse.
-- Listeners run synchronously; an exception in one listener throws into the
-  caller of `notify()`. Catch in the listener if needed. The listeners that
+- Listeners run synchronously; an exception in a listener throws into the
+  caller of `notify()` once the other listeners have run. Catch in the
+  listener if needed. The listeners that
   `waitFor` / `waitForValue` register catch their own errors and reject the
   promise instead.
 - `waitFor` / `waitForValue` accept sources whose `onUpdate` calls the
@@ -224,7 +242,7 @@ changes, `notify()` is not called.
 
 ### Dependencies
 
-Zero dependencies.
+`@statewalker/shared-generators` (for `readValues`).
 
 ## License
 

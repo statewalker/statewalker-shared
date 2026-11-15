@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { BaseClass } from "../src/base-class.js";
 import { readValues } from "../src/read-values.js";
 
+// The package compiles against ESNext only (no DOM / Node typings).
+const host = globalThis as unknown as { setTimeout(fn: () => void, ms: number): unknown };
+const settle = () => new Promise<void>((r) => host.setTimeout(r, 5));
+
 describe("readValues", () => {
   it("yields each newly produced value after notify", async () => {
     class Box extends BaseClass {
@@ -72,6 +76,24 @@ describe("readValues", () => {
     await iter.next();
     await iter.return?.(undefined);
     expect(cleaned).toBe(true);
+  });
+
+  it("calls read only when the consumer asks for the next value (built on newAsyncGenerator, #41)", async () => {
+    const box = new BaseClass();
+    let reads = 0;
+    const iter = readValues(box.onUpdate, () => ++reads);
+    expect(reads).toBe(0);
+    expect((await iter.next()).value).toBe(1);
+    await settle();
+    expect(reads).toBe(1);
+    box.notify();
+    await settle();
+    expect(reads).toBe(1);
+    expect((await iter.next()).value).toBe(2);
+    await iter.return(undefined);
+    box.notify();
+    await settle();
+    expect(reads).toBe(2);
   });
 
   describe("return() while the consumer waits for a value (#34)", () => {

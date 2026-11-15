@@ -27,6 +27,7 @@
  * key string is owned by exactly one declaration in the codebase.
  */
 
+import { Notifier } from "@statewalker/shared-baseclass";
 import type { KeyedSlotDeclaration, SlotDeclaration } from "./define-slot.js";
 
 interface KeyedEntry<T> {
@@ -35,13 +36,13 @@ interface KeyedEntry<T> {
 }
 
 /**
- * One `observe` call. Each call gets its own record, so observing the
- * same callback twice yields two independent subscriptions, and a
- * record removed mid-notification is skipped for the rest of the pass.
+ * Observer errors are logged and never reach the code that mutated the
+ * slot. Observers of one key share a {@link Notifier}: each `observe` call
+ * is an independent subscription, observers added during a pass are not
+ * called by it, and those removed during it are skipped.
  */
-interface Subscription<S> {
-  readonly cb: (snapshot: S) => void;
-  active: boolean;
+function newWatchers<S>(): Notifier<S> {
+  return new Notifier<S>({ onError: (error) => console.error(error) });
 }
 
 /**
@@ -95,16 +96,13 @@ export class Slots {
   // the contribution; a disposer only removes the value while the
   // token it captured is still the current one.
   private readonly _plainValues = new Map<string, Map<unknown, object>>();
-  private readonly _plainWatchers = new Map<string, Set<Subscription<readonly unknown[]>>>();
+  private readonly _plainWatchers = new Map<string, Notifier<readonly unknown[]>>();
   private readonly _plainSnapshots = new Map<string, readonly unknown[]>();
 
   // Keyed-slot storage. The bus owns the index and snapshot cache
   // per key, shared across all consumers of the same keyed slot.
   private readonly _keyedEntries = new Map<string, Map<string, KeyedEntry<unknown>>>();
-  private readonly _keyedWatchers = new Map<
-    string,
-    Set<Subscription<ReadonlyMap<string, unknown>>>
-  >();
+  private readonly _keyedWatchers = new Map<string, Notifier<ReadonlyMap<string, unknown>>>();
   private readonly _keyedSnapshots = new Map<string, ReadonlyMap<string, unknown>>();
 
   /**
@@ -277,18 +275,18 @@ export class Slots {
   // === Internals ===
 
   private _subscribe<S>(
-    registry: Map<string, Set<Subscription<S>>>,
+    registry: Map<string, Notifier<S>>,
     key: string,
     cb: (snapshot: S) => void,
     initial: S,
   ): () => void {
     let watchers = registry.get(key);
     if (!watchers) {
-      watchers = new Set();
+      watchers = newWatchers<S>();
       registry.set(key, watchers);
     }
-    const sub: Subscription<S> = { cb, active: true };
-    watchers.add(sub);
+    const owned = watchers;
+    const dispose = owned.add(cb);
     try {
       cb(initial);
     } catch (error) {
@@ -296,29 +294,14 @@ export class Slots {
     }
 
     return () => {
-      if (!sub.active) return;
-      sub.active = false;
-      const ws = registry.get(key);
-      if (!ws) return;
-      ws.delete(sub);
-      if (ws.size === 0) registry.delete(key);
+      dispose();
+      if (owned.size === 0 && registry.get(key) === owned) registry.delete(key);
     };
   }
 
-  private _notify<S>(watchers: Set<Subscription<S>> | undefined, snapshot: () => S): void {
-    if (!watchers) return;
-    const snap = snapshot();
-    // Iterate a copy: observers added during this pass are not called
-    // by it (they already got their immediate snapshot); observers
-    // removed during it are skipped through their `active` flag.
-    for (const sub of [...watchers]) {
-      if (!sub.active) continue;
-      try {
-        sub.cb(snap);
-      } catch (error) {
-        console.error(error);
-      }
-    }
+  private _notify<S>(watchers: Notifier<S> | undefined, snapshot: () => S): void {
+    // One cached snapshot per pass, shared by every observer.
+    if (watchers) watchers.notify(snapshot());
   }
 
   private _notifyPlain(key: string): void {

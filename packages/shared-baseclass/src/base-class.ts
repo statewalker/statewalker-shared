@@ -1,24 +1,28 @@
+import { Notifier } from "./notifier.js";
+
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export class BaseClass {
-  private _listeners: Set<() => void> = new Set();
+  // A TypeScript-private field rather than `#notifier`, so that BaseClass
+  // instances keep working behind a Proxy.
+  private readonly _notifier = new Notifier({ dedupe: true });
 
   /**
-   * Registers `callback` and returns its disposer. Listeners are kept in a `Set`, so they are
-   * deduplicated by reference: registering the same function twice keeps one entry, and either
-   * disposer removes it. Wrap the callback (`() => cb()`) for independent subscriptions.
+   * Registers `callback` and returns its disposer. Listeners are deduplicated by reference:
+   * registering the same function twice keeps one entry, and either disposer removes it. Wrap
+   * the callback (`() => cb()`) for independent subscriptions. A disposer is idempotent and never
+   * removes a later registration of the same function.
    */
-  onUpdate = (callback: () => void): (() => void) => {
-    this._listeners.add(callback);
-    return () => {
-      this._listeners.delete(callback);
-    };
-  };
+  onUpdate = (callback: () => void): (() => void) => this._notifier.add(callback);
 
+  /**
+   * Calls every listener registered before this call. A listener added during the pass is first
+   * called by the next `notify()`; one removed during it is skipped. A throwing listener does not
+   * stop the others: `notify()` rethrows once all have run (an `AggregateError` when several
+   * threw).
+   */
   notify(): void {
-    for (const listener of this._listeners) {
-      listener();
-    }
+    this._notifier.notify();
   }
 
   toJSON(): Record<string, unknown> {

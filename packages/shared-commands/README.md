@@ -56,7 +56,8 @@ The full DX is in [Examples](#examples). API surface at a glance:
 
 One entry point, `@statewalker/shared-commands` (ESM, `dist/index.js` with
 types). It runs in browsers, Node and workers. Runtime dependencies:
-`@standard-community/standard-json` and `@standard-schema/spec`. Install the
+`@standard-community/standard-json`, `@standard-schema/spec` and
+`@statewalker/shared-baseclass`. Install the
 schema library you use (for example `zod`) yourself.
 
 Exports:
@@ -323,6 +324,11 @@ its `loadVendor` function. A `passthrough()` schema derives `{}` (any value).
 - `@standard-community/standard-json` — runtime, async-first. Derives
   JSON Schema from Standard Schemas. Vendors (zod, valibot, arktype,
   typebox, sury, effect) are dynamically imported on first use.
+- `@statewalker/shared-baseclass` — runtime. The mutable registry's
+  `onUpdate` subscribers live in its `Notifier`. Every subscriber runs even
+  when one throws, and the error is rethrown to the caller of `set` /
+  `remove` afterwards. Disposers are idempotent, and subscribing the same
+  function twice keeps one subscription.
 
 ## License
 

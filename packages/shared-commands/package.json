@@ -50,7 +50,8 @@
   },
   "dependencies": {
     "@standard-community/standard-json": "catalog:",
-    "@standard-schema/spec": "catalog:"
+    "@standard-schema/spec": "catalog:",
+    "@statewalker/shared-baseclass": "workspace:^"
   },
   "devDependencies": {
     "rimraf": "catalog:",
