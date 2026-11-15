@@ -62,10 +62,10 @@ Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
   - `provide(decl, value): () => void` (plain)
   - `observe(decl, cb): () => void` (overloaded for plain and keyed)
   - `getSnapshot(decl)` — `readonly T[]` for plain slots (frozen),
-    `ReadonlyMap<string, T>` for keyed slots; reference-stable until the next
-    change
+    a read-only `ReadonlyMap<string, T>` view for keyed slots; reference-stable
+    until the next change
   - `register(decl, id, value): () => void` (keyed; collision-throws)
-  - `get(decl, id): T | null` (keyed)
+  - `get(decl, id): T | null` (keyed; `null` for an unknown id)
 
 ## Examples
 
@@ -113,12 +113,16 @@ const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
   Providing the same object twice = one entry. Two structurally-equal
   distinct objects = two entries. Plain entries are not ref-counted: if the
   same object was provided twice, the first disposer call removes it.
+- **Idempotent disposers.** Calling a disposer again is a no-op. A disposer
+  never removes a contribution made after its own was removed, even of the
+  same object (safe under React StrictMode and disposer bags).
 - **Snapshot stability.** `getSnapshot(decl)` returns a frozen array,
   reference-stable until the next mutation. Safe to feed straight into
   `useSyncExternalStore` consumers.
 - **Observe.** Callback fires once synchronously with the current values,
-  then synchronously on every mutation. It receives a new array each time
-  (not the cached `getSnapshot` array).
+  then synchronously on every mutation. It receives the same frozen array
+  `getSnapshot` returns, so every observer of one notification sees the same
+  unmodifiable array.
 
 ### Keyed slots
 
@@ -127,11 +131,18 @@ const off = slots.observe(coreViewsSlot, (entries) => { /* … */ });
   `RangeError: Slots.register: id "<id>" is already registered with a different value (slotKey="<key>")`.
 - **Ref-counted re-register.** Registering the *same* value reference
   under the same id is a ref-counted no-op (the entry survives until
-  every disposer fires).
+  every disposer fires). Each disposer counts once: calling it again is a
+  no-op, and a disposer never releases a later registration made under the
+  same id after its own entry was removed.
+- **Read-only snapshot.** `getSnapshot(decl)` returns a read-only view
+  implementing `ReadonlyMap<string, T>` (not a `Map` instance): it has no
+  `set` / `delete` / `clear`, so the cached snapshot cannot be corrupted.
 - **O(1) lookup.** `get(decl, id)` reads from a per-key index cached
-  on the bus.
+  on the bus. It returns `null` for an unknown id, which is
+  indistinguishable from a value registered as `null`; use
+  `getSnapshot(decl).has(id)` to tell them apart.
 - **Observe.** Same semantics as plain — sync immediate snapshot then
-  sync notifications, with `ReadonlyMap<string, T>` as the value.
+  sync notifications, with the cached `getSnapshot` view as the value.
 
 ### Bus scoping
 
@@ -154,6 +165,11 @@ without touching either the module or the host.
   must not mutate contributed objects.
 - Observers run synchronously; an exception in one observer is caught
   and reported via `console.error`, then the remaining observers fire.
+- Each `observe` call is its own subscription: observing the same callback
+  twice yields two subscriptions, each removed only by its own disposer.
+- A notification pass calls the observers subscribed when it started. An
+  observer added during the pass gets only its immediate snapshot from that
+  pass; an observer removed during the pass is not called by it.
 - Two different `Slots` instances are completely isolated — there is no
   cross-instance broadcast.
 
