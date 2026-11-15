@@ -1,5 +1,13 @@
 # @statewalker/shared-logger-pino
 
+## 0.1.5
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - @statewalker/shared-logger ^0.1.4 -> ^0.1.5
+
 ## 0.1.4
 
 ### Patch Changes
