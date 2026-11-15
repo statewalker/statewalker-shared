@@ -15,7 +15,8 @@ describe("Commands — bus semantics", () => {
     await commands.call(Decl, {}).promise;
 
     const late = vi.fn(async () => ({ y: "late" }));
-    commands.listen(Decl, late);
+    // Higher priority, so the first listener's claim does not stop it (#60).
+    commands.listen(Decl, late, { priority: 1 });
 
     await commands.call(Decl, {}).promise;
     expect(late).toHaveBeenCalledTimes(1);

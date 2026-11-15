@@ -10,6 +10,7 @@ import type { Command, CommandDeclaration, CommandListener } from "./types.js";
  * - `pending`: input validation or the listener pass is running, or no
  *   listener claimed the command and the policy says wait.
  * - `claimed`: a listener returned `true` or a promise; nothing settled yet.
+ *   The claim ends the listener pass: lower-priority listeners do not run.
  * - `validating`: the first `resolve` arrived (from a listener, its promise
  *   or the caller) and the output schema is running. The command counts as
  *   claimed from here on, and later `resolve` / `reject` calls are ignored.
@@ -54,7 +55,8 @@ function validate<T>(
 
 /**
  * Dispatch one command: validate the input, run the listeners returned by
- * `listeners()` (already ordered), apply the declaration's policy, and
+ * `listeners()` (already ordered) until one claims or settles it, apply the
+ * declaration's policy, and
  * settle through output validation. Every settlement route (a listener's
  * direct `resolve` / `reject`, its returned promise, its throw, the
  * caller's `resolve` / `reject` after a `true` claim) goes through the one
@@ -138,17 +140,21 @@ export function dispatchCommand<P, R>(
         listenerThrew(err, fn);
         return;
       }
+      // A claim (`true` or a promise) short-circuits the dispatch: the
+      // lower-priority listeners do not run (#60).
       if (returned === true) {
         if (state === "pending") state = "claimed";
-      } else if (isThenable<R>(returned)) {
+        return;
+      }
+      if (isThenable<R>(returned)) {
         if (state === "pending") state = "claimed";
         returned.then(
           (value) => resolve(value, fn),
           (err) => listenerThrew(err, fn),
         );
-      } else {
-        observed = true;
+        return;
       }
+      observed = true;
     }
     if (state !== "pending") return;
     if (list.length === 0) {

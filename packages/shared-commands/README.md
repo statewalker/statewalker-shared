@@ -149,14 +149,21 @@ A listener returns one of:
 - `Promise<R>` — claim and settle when the promise resolves.
 
 **Priority.** `commands.listen(decl, fn, { priority })` controls invocation
-order. Default `0`; higher fires earlier; ties unspecified. Negative
-priorities are the convention for default / fallback handlers:
+order. Default `0`; higher fires earlier; ties unspecified. A claim
+short-circuits the dispatch: once a listener returns `true` or a promise,
+lower-priority listeners do not run. Observers (listeners returning `void`)
+at a higher priority than the claimer still run. Negative priorities are the
+convention for default / fallback handlers:
 
 ```ts
 commands.listen(decl, fn);                          // default — priority 0
-commands.listen(decl, validator, { priority: 100 }); // early — short-circuit
-commands.listen(decl, fallback, { priority: -1 });   // late — fires after all others
+commands.listen(decl, override, { priority: 100 }); // early — its claim stops the dispatch
+commands.listen(decl, fallback, { priority: -1 });  // late — fires only if no higher-priority listener claimed
 ```
+
+A host overrides a default handler by listening at a higher priority and
+claiming: the default handler never sees the command, so it needs no way to
+tell whether someone else took it.
 
 **Validation** runs at the bus boundary: `payload` is validated against
 `inputSchema` before any listener sees the command (failure → call rejects
@@ -241,10 +248,14 @@ intentionally never resolve. Callers either don't `await` them, or guard with
 The bus stores listeners in a `Map<key, ListenerRecord[]>` where each record
 carries `{ fn, priority, seq }`. Dispatch snapshots the listener list, sorts
 by descending `priority` (ties resolved by `seq` — insertion order, but
-documented as unspecified), and iterates synchronously. The first listener
-that throws (or returns a rejecting promise) short-circuits the dispatch —
-remaining listeners do not run, and the bus rejects with
-`CommandError("listener-threw")` reporting the offending function.
+documented as unspecified), and iterates synchronously. A claim
+short-circuits the dispatch: lower-priority listeners do not run. The loop
+stops at the first listener that returns `true` or a promise, or that
+settles the command directly with `cmd.resolve` / `cmd.reject`. The first
+listener that throws also short-circuits the dispatch — remaining listeners
+do not run, and the bus rejects with `CommandError("listener-threw")`
+reporting the offending function. (A listener whose returned promise rejects
+has already claimed, so the listeners after it never ran.)
 
 Input validation runs first via Standard Schema's `~standard.validate`. If
 the validator returns a sync result, the listener pass runs synchronously
@@ -299,10 +310,10 @@ its `loadVendor` function. A `passthrough()` schema derives `{}` (any value).
 - Registering (or seeding `create(...)` with) a different declaration under an existing key throws
   `RangeError: CommandsRegistry: key "<key>" already registered with a different declaration`.
 
-- Listener-throw short-circuits dispatch. Observers registered after a
-  buggy handler will not run if the handler throws or returns a rejecting
-  promise. Register critical observers at a higher priority than handlers
-  that might throw.
+- A claim short-circuits dispatch, and so does a listener throw. Observers
+  at a lower priority than a claiming (or throwing) handler do not run.
+  Register observers that must see every dispatch at a higher priority than
+  any handler.
 - Same-priority dispatch order is unspecified. If a caller needs
   deterministic order, encode it as priority.
 - Pending-forever (silent policy with no claimer) is intentional and is
