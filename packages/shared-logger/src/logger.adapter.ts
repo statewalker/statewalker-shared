@@ -1,4 +1,3 @@
-/// <reference types="node" />
 import { newAdapter } from "@statewalker/shared-adapters";
 
 const Levels = {
@@ -48,7 +47,7 @@ export function newConsoleLogger(
         return logLevel;
       },
       set level(newLevel: LoggerLevel) {
-        if (Levels[newLevel] === undefined) {
+        if (!isLoggerLevel(newLevel)) {
           throw new Error(`Unknown log level: ${newLevel}`);
         }
         logLevel = newLevel;
@@ -65,9 +64,26 @@ export function newConsoleLogger(
   }
 }
 
+function isLoggerLevel(value: unknown): value is LoggerLevel {
+  return typeof value === "string" && Object.hasOwn(Levels, value);
+}
+
+function newProcessId(): string {
+  // Self-typed: `crypto` is a global in browsers and Node 19+, but this file must
+  // compile without DOM or node types. `randomUUID` is missing in insecure browser
+  // contexts (plain http), hence the fallback.
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID().slice(0, 8);
+  }
+  return Math.floor(Math.random() * 0x1_0000_0000)
+    .toString(16)
+    .padStart(8, "0");
+}
+
 export function getProcessId(context: Record<string, unknown>): string {
   const key = "app.processId";
-  context[key] = context[key] || Math.random().toString(16).slice(8);
+  context[key] = context[key] || newProcessId();
   return context[key] as string;
 }
 
@@ -81,9 +97,13 @@ export const [getLogger, setLogger, removeLogger] = newAdapter<Logger, Record<st
     // tsconfig lacks node types, and `process` is absent in the browser — guard both.
     const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
       ?.env;
-    const logLevel = (env?.LOG_LEVEL ?? "info") as LoggerLevel;
+    const requested = (env?.LOG_LEVEL || "info").toLowerCase();
+    const logLevel: LoggerLevel = isLoggerLevel(requested) ? requested : "info";
     logger.level = logLevel;
-    logger.info(`[backbone] Starting up with log level: ${logLevel}`);
+    if (logLevel !== requested) {
+      logger.warn(`[shared-logger] Unknown LOG_LEVEL "${env?.LOG_LEVEL}", using "info"`);
+    }
+    logger.info(`[shared-logger] Starting up with log level: ${logLevel}`);
     return logger;
   },
   () => undefined,

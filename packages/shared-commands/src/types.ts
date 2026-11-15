@@ -6,8 +6,13 @@ import type { DispatchPolicy } from "./policy.js";
  * A single dispatched command waiting to be settled.
  *
  * `resolve` / `reject` are settled-guarded: the first call wins, later
- * calls no-op. Listener claim state is internal to the bus — callers do
+ * calls no-op — also while an async output schema is still validating the
+ * first `resolve`. Listener claim state is internal to the bus — callers do
  * not observe it from the `Command` value.
+ *
+ * `payload` is the value returned by `decl.inputSchema` (defaults,
+ * coercions and transforms applied), and `promise` resolves with the value
+ * returned by `decl.outputSchema` for the first `resolve`.
  */
 export interface Command<P, R> {
   readonly key: string;
@@ -68,8 +73,16 @@ interface ListenerRecord {
 }
 
 interface CommandInternal<P, R> extends Command<P, R> {
+  /** Set internally to the validated input value before dispatch. */
+  payload: P;
   claimed: boolean;
   observerRan: boolean;
+  /**
+   * Settle with `value` after output validation. `listener` is reported on
+   * an `output-validation` failure when the value came from a listener's
+   * returned promise. Settled-guarded like `resolve`.
+   */
+  resolveFrom(value: R, listener?: CommandListener<unknown, unknown>): void;
 }
 
 function isThenable<T>(value: unknown): value is Promise<T> {
@@ -106,13 +119,18 @@ export class Commands {
 
   call<P, R>(decl: CommandDeclaration<P, R>, payload: P): Command<P, R> {
     const cmd = makeCommand<P, R>(decl, payload);
+    const inputError = (cause: unknown) =>
+      cmd.reject(new CommandError("input-validation", { commandKey: decl.key, cause }));
 
-    const inputResult = decl.inputSchema["~standard"].validate(payload);
+    let inputResult: StandardSchemaV1.Result<P> | Promise<StandardSchemaV1.Result<P>>;
+    try {
+      inputResult = decl.inputSchema["~standard"].validate(payload);
+    } catch (e) {
+      inputError(e);
+      return cmd;
+    }
     if (isThenable(inputResult)) {
-      inputResult.then(
-        (r) => this._dispatchAfterInput(decl, cmd, r),
-        (e) => cmd.reject(new CommandError("input-validation", { commandKey: decl.key, cause: e })),
-      );
+      inputResult.then((r) => this._dispatchAfterInput(decl, cmd, r), inputError);
     } else {
       this._dispatchAfterInput(decl, cmd, inputResult);
     }
@@ -162,6 +180,9 @@ export class Commands {
       return;
     }
     if (cmd.settled) return;
+    // Listeners see the validated value: schema defaults, coercions and
+    // transforms apply, matching the declaration's payload type.
+    cmd.payload = result.value;
 
     const list = this._listeners.get(decl.key);
     const snapshot = list ? [...list] : [];
@@ -191,7 +212,7 @@ export class Commands {
       } else if (isThenable<R>(returned)) {
         cmd.claimed = true;
         returned.then(
-          (value) => this._resolveWithOutputValidation(decl, cmd, value, record.fn),
+          (value) => cmd.resolveFrom(value, record.fn),
           (err) =>
             cmd.reject(
               new CommandError("listener-threw", {
@@ -221,48 +242,6 @@ export class Commands {
       }
     }
   }
-
-  private _resolveWithOutputValidation<P, R>(
-    decl: CommandDeclaration<P, R>,
-    cmd: CommandInternal<P, R>,
-    value: R,
-    listener: CommandListener<unknown, unknown>,
-  ): void {
-    if (cmd.settled) return;
-    const out = decl.outputSchema["~standard"].validate(value);
-    if (isThenable(out)) {
-      out.then(
-        (r) => this._completeOutputValidation(decl, cmd, value, r, listener),
-        (e) =>
-          cmd.reject(
-            new CommandError("output-validation", { commandKey: decl.key, cause: e, listener }),
-          ),
-      );
-    } else {
-      this._completeOutputValidation(decl, cmd, value, out, listener);
-    }
-  }
-
-  private _completeOutputValidation<P, R>(
-    decl: CommandDeclaration<P, R>,
-    cmd: CommandInternal<P, R>,
-    value: R,
-    result: StandardSchemaV1.Result<R>,
-    listener: CommandListener<unknown, unknown>,
-  ): void {
-    if (cmd.settled) return;
-    if (result.issues) {
-      cmd.reject(
-        new CommandError("output-validation", {
-          commandKey: decl.key,
-          cause: result.issues,
-          listener,
-        }),
-      );
-      return;
-    }
-    cmd.resolve(value);
-  }
 }
 
 function makeCommand<P, R>(decl: CommandDeclaration<P, R>, payload: P): CommandInternal<P, R> {
@@ -273,6 +252,25 @@ function makeCommand<P, R>(decl: CommandDeclaration<P, R>, payload: P): CommandI
     rejectFn = reject;
   });
 
+  const outputError = (cause: unknown, listener?: CommandListener<unknown, unknown>) =>
+    new CommandError("output-validation", {
+      commandKey: decl.key,
+      cause,
+      ...(listener ? { listener } : {}),
+    });
+
+  const finish = (
+    result: StandardSchemaV1.Result<R>,
+    listener?: CommandListener<unknown, unknown>,
+  ) => {
+    if (result.issues) rejectFn(outputError(result.issues, listener));
+    else resolveFn(result.value);
+  };
+
+  // `settled` flips synchronously on the first `resolve` / `reject` (and
+  // the command counts as claimed), even when output validation is async:
+  // later calls are ignored while that validation runs, so the first call
+  // wins and the policy check sees the claim.
   const cmd: CommandInternal<P, R> = {
     key: decl.key,
     payload,
@@ -280,20 +278,27 @@ function makeCommand<P, R>(decl: CommandDeclaration<P, R>, payload: P): CommandI
     claimed: false,
     observerRan: false,
     resolve(value: R) {
+      cmd.resolveFrom(value);
+    },
+    resolveFrom(value: R, listener?: CommandListener<unknown, unknown>) {
       if (cmd.settled) return;
-      const out = decl.outputSchema["~standard"].validate(value);
-      if (isThenable(out)) {
-        out.then(
-          (r) => completeManualResolve(decl, cmd, value, r, resolveFn, rejectFn),
-          (e) => {
-            if (cmd.settled) return;
-            cmd.settled = true;
-            rejectFn(new CommandError("output-validation", { commandKey: decl.key, cause: e }));
-          },
-        );
+      cmd.settled = true;
+      cmd.claimed = true;
+      let out: StandardSchemaV1.Result<R> | Promise<StandardSchemaV1.Result<R>>;
+      try {
+        out = decl.outputSchema["~standard"].validate(value);
+      } catch (e) {
+        rejectFn(outputError(e, listener));
         return;
       }
-      completeManualResolve(decl, cmd, value, out, resolveFn, rejectFn);
+      if (isThenable(out)) {
+        out.then(
+          (r) => finish(r, listener),
+          (e) => rejectFn(outputError(e, listener)),
+        );
+      } else {
+        finish(out, listener);
+      }
     },
     reject(error: unknown) {
       if (cmd.settled) return;
@@ -304,23 +309,4 @@ function makeCommand<P, R>(decl: CommandDeclaration<P, R>, payload: P): CommandI
     promise,
   };
   return cmd;
-}
-
-function completeManualResolve<P, R>(
-  decl: CommandDeclaration<P, R>,
-  cmd: CommandInternal<P, R>,
-  value: R,
-  result: StandardSchemaV1.Result<R>,
-  resolveFn: (value: R) => void,
-  rejectFn: (reason: unknown) => void,
-): void {
-  if (cmd.settled) return;
-  if (result.issues) {
-    cmd.settled = true;
-    rejectFn(new CommandError("output-validation", { commandKey: decl.key, cause: result.issues }));
-    return;
-  }
-  cmd.settled = true;
-  cmd.claimed = true;
-  resolveFn(value);
 }

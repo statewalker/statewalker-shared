@@ -30,7 +30,7 @@ class MutableRegistry implements MutableCommandsRegistry {
       const existing = this._map.get(d.key);
       if (existing && existing !== d) {
         throw new RangeError(
-          `CommandsRegistry: duplicate key "${d.key}" with different declaration in seed`,
+          `CommandsRegistry: key "${d.key}" already registered with a different declaration`,
         );
       }
       this._map.set(d.key, d);
@@ -137,8 +137,42 @@ function filterView(
   };
 }
 
+/**
+ * Frozen copy of `d` with `prefix` added to `key`. Data fields are copied;
+ * accessors (the lazy `inputJsonSchema` / `outputJsonSchema` getters) are
+ * re-defined to delegate to `d`, so wrapping never evaluates them.
+ */
+function prefixDeclaration(d: AnyDeclaration, prefix: string): AnyDeclaration {
+  const props: PropertyDescriptorMap = {};
+  for (const name of Reflect.ownKeys(d)) {
+    const desc = Object.getOwnPropertyDescriptor(d, name);
+    if (!desc) continue;
+    if (name === "key") {
+      props[name] = { value: prefix + d.key, enumerable: desc.enumerable };
+    } else if (desc.get) {
+      props[name] = {
+        get: () => Reflect.get(d, name),
+        enumerable: desc.enumerable,
+      };
+    } else {
+      props[name] = { value: desc.value, enumerable: desc.enumerable };
+    }
+  }
+  return Object.freeze(Object.defineProperties({}, props)) as AnyDeclaration;
+}
+
 function namespaceView(source: CommandsRegistry, prefix: string): CommandsRegistry {
-  const wrap = (d: AnyDeclaration): AnyDeclaration => Object.freeze({ ...d, key: prefix + d.key });
+  // One wrapper per source declaration, so `get(k) === get(k)` and
+  // re-adding a wrapper to a mutable registry is an idempotent no-op.
+  const cache = new WeakMap<AnyDeclaration, AnyDeclaration>();
+  const wrap = (d: AnyDeclaration): AnyDeclaration => {
+    let w = cache.get(d);
+    if (!w) {
+      w = prefixDeclaration(d, prefix);
+      cache.set(d, w);
+    }
+    return w;
+  };
   return {
     list(): readonly AnyDeclaration[] {
       return source.list().map(wrap);

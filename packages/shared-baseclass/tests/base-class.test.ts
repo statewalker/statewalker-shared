@@ -81,4 +81,79 @@ describe("BaseClass", () => {
     m.fromJSON({ name: "same" });
     expect(listener).not.toHaveBeenCalled();
   });
+
+  describe("fromJSON ignores keys toJSON would not emit (#27)", () => {
+    class Model extends BaseClass {
+      name = "a";
+      _secret = "keep";
+    }
+
+    it("ignores __proto__ from parsed JSON and keeps the prototype", () => {
+      const m = new Model();
+      const listener = vi.fn();
+      m.onUpdate(listener);
+      expect(() => m.fromJSON(JSON.parse('{"__proto__":{"x":1}}'))).not.toThrow();
+      expect(m).toBeInstanceOf(BaseClass);
+      expect(m).toBeInstanceOf(Model);
+      expect((m as unknown as { x?: unknown }).x).toBeUndefined();
+      expect(listener).not.toHaveBeenCalled();
+      m.notify();
+      expect(listener).toHaveBeenCalledOnce();
+    });
+
+    it("ignores constructor and prototype keys", () => {
+      const m = new Model();
+      m.fromJSON({ constructor: 1, prototype: 2 });
+      expect(m.constructor).toBe(Model);
+      expect(Object.hasOwn(m, "prototype")).toBe(false);
+    });
+
+    it("ignores _-prefixed keys, including _listeners", () => {
+      const m = new Model();
+      const listener = vi.fn();
+      m.onUpdate(listener);
+      expect(() => m.fromJSON({ _listeners: null, _secret: "changed" })).not.toThrow();
+      expect(m._secret).toBe("keep");
+      expect(listener).not.toHaveBeenCalled();
+      m.notify();
+      expect(listener).toHaveBeenCalledOnce();
+    });
+
+    it("ignores keys whose current value is a function", () => {
+      class WithMethod extends Model {
+        doThing() {
+          return 1;
+        }
+      }
+      const m = new WithMethod();
+      const onUpdate = m.onUpdate;
+      const listener = vi.fn();
+      m.onUpdate(listener);
+      m.fromJSON({ onUpdate: 5, notify: 6, doThing: 7, toJSON: 8 });
+      expect(m.onUpdate).toBe(onUpdate);
+      expect(m.doThing()).toBe(1);
+      expect(m.toJSON()).toEqual({ name: "a" });
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("still applies ordinary keys next to ignored ones", () => {
+      const m = new Model();
+      const listener = vi.fn();
+      m.onUpdate(listener);
+      m.fromJSON({ name: "b", _secret: "x", onUpdate: 1 });
+      expect(m.name).toBe("b");
+      expect(m._secret).toBe("keep");
+      expect(listener).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("listeners are deduplicated by reference: one disposer removes the shared entry", () => {
+    const obj = new BaseClass();
+    const listener = vi.fn();
+    const off1 = obj.onUpdate(listener);
+    obj.onUpdate(listener);
+    off1();
+    obj.notify();
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
