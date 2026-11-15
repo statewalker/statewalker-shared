@@ -159,10 +159,14 @@ commands.listen(decl, fallback, { priority: -1 });   // late — fires after all
 
 **Validation** runs at the bus boundary: `payload` is validated against
 `inputSchema` before any listener sees the command (failure → call rejects
-with `CommandError("input-validation")`, no listener invoked). Each `cmd.resolve(value)` is validated against
+with `CommandError("input-validation")`, no listener invoked). Listeners see
+the schema's validated value as `cmd.payload`, so defaults, coercions and
+transforms apply. The first `cmd.resolve(value)` is validated against
 `outputSchema` (failure → call rejects with `CommandError("output-validation")`;
 when the value came from a listener's returned promise, `error.listener` is
-that listener).
+that listener), and the caller's promise resolves with the validated value.
+A validator that throws instead of returning issues is reported the same way,
+with the thrown error as `error.cause`.
 
 ### Registries
 
@@ -248,10 +252,12 @@ schemas use async refinements), the listener pass is deferred until the
 promise resolves — `commands.call(...)` still returns the `Command<P, R>`
 synchronously, but its `promise` settles later.
 
-Output validation runs on every `cmd.resolve(value)` — both
-listener-returned Promise resolves and explicit `cmd.resolve` calls from
-inside listeners. The first `resolve` or `reject` settles the command; a
-`resolve` with an invalid value settles it as a rejection.
+Output validation runs on the first `cmd.resolve(value)` — whether it comes
+from a listener-returned Promise or an explicit `cmd.resolve` call. The first
+`resolve` or `reject` settles the command: `cmd.settled` becomes `true` and
+the command counts as claimed at once, even when the output schema validates
+asynchronously, and later `resolve` / `reject` calls are ignored. A `resolve`
+with an invalid value settles it as a rejection.
 
 `CommandsRegistry.create(...)` holds a `Map<string, CommandDeclaration>` and
 a `Set<() => void>` of `onUpdate` subscribers. Variadic `.set(...)` is
@@ -260,7 +266,11 @@ key) before any entry is added; on collision a `RangeError` is thrown and
 the map is unchanged. Duplicate keys inside one `.set(...)` call are not
 checked against each other: the first declaration is kept. Idempotent re-registration (same reference) is a
 no-op (no `onUpdate` fire). Composed / filtered / namespaced views hold no
-state — subscribers and lookups delegate to the underlying source(s).
+state beyond a cache — subscribers and lookups delegate to the underlying
+source(s). A namespace view returns one frozen wrapper per source declaration
+(cached in a `WeakMap`), so `ns.get(k) === ns.get(k)` and re-adding a wrapper
+to a mutable registry is a no-op; its JSON-schema getters delegate to the
+source declaration and are not evaluated by `list()` / `get()`.
 
 JSON Schema (`inputJsonSchema` / `outputJsonSchema`) is exposed as a lazy
 `Promise<Record<string, unknown>>` getter on each declaration. The first
@@ -269,14 +279,16 @@ read triggers async vendor loading inside
 Promise. This keeps the substrate validator-agnostic — Zod, Valibot,
 ArkType, TypeBox, Effect Schema, Sury are supported by
 `@standard-community/standard-json`; other validators can be registered with
-its `loadVendor` function.
+its `loadVendor` function. A `passthrough()` schema derives `{}` (any value).
 
 ### Constraints
 
+- Each builder stage returns a new builder, so branching from a shared stage
+  (`const base = Command.required(k).input(s)`) is safe.
 - Builder misuse throws at declaration time:
   `Command "<key>": .input(...) and .output(...) must be called before .build()`,
   and `Command "<key>": label already set` (same for `description`, `icon`).
-- Registering a different declaration under an existing key throws
+- Registering (or seeding `create(...)` with) a different declaration under an existing key throws
   `RangeError: CommandsRegistry: key "<key>" already registered with a different declaration`.
 
 - Listener-throw short-circuits dispatch. Observers registered after a
