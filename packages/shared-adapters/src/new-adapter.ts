@@ -10,7 +10,12 @@
  * @param key - The unique key used to identify the adapter instance in the context object.
  * @param create - An optional factory function to create the adapter instance if it is not found.
  * @param getParent - A function to retrieve the parent context of a given context object.
- *                    Defaults to accessing the `parent` property of the object.
+ *                    Defaults to accessing the `parent` property of the object, so by default
+ *                    `get` inherits values from `context.parent`, `context.parent.parent`, ...
+ *                    Note: {@link getAdapter} defaults to *no* parent walk instead.
+ *
+ * Lookup reads only the context's own properties (`Object.hasOwn`), never inherited ones, and
+ * a value of `undefined` counts as missing. A cyclic parent chain is walked once and then stops.
  *
  * @returns A tuple containing:
  * - `get`: A function to retrieve the adapter instance from a context object. If the instance
@@ -63,12 +68,16 @@ export function newAdapter<T, P = Record<string, unknown>>(
 ] {
   const get = (context: P, optional = false): T => {
     let result: T | undefined;
+    // Track visited contexts so a cyclic parent chain ends instead of looping forever.
+    const visited = new Set<unknown>();
     for (
       let current: P | undefined = context;
-      result === undefined && current;
+      result === undefined && current && !visited.has(current);
       current = getParent(current)
     ) {
-      if (current && typeof current === "object" && key in current) {
+      visited.add(current);
+      // Own properties only: inherited members (e.g. `Object.prototype.constructor`) never count.
+      if (typeof current === "object" && Object.hasOwn(current, key)) {
         result = (current as Record<string, T>)[key];
       }
     }
@@ -91,7 +100,7 @@ export function newAdapter<T, P = Record<string, unknown>>(
   };
 
   const remove = (context: P): void => {
-    if (context && typeof context === "object" && key in context) {
+    if (context && typeof context === "object" && Object.hasOwn(context, key)) {
       delete (context as Record<string, unknown>)[key];
     }
   };
