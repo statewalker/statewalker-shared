@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-ids",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": false,
   "type": "module",
   "description": "Snowflake IDs in Crockford base32, snowflake parsing and SHA-1 hex digests.",
