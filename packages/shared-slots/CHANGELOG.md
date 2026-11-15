@@ -1,5 +1,11 @@
 # @statewalker/shared-slots
 
+## 0.2.5
+
+### Patch Changes
+
+- 3b116ea: Make plain and keyed slot disposers idempotent so a stale or repeated disposer never removes a later registration (#21). Return a read-only keyed snapshot view, pass observers the cached frozen snapshot, iterate a copy of observers, keep one subscription per `observe` call, and document `get` returning `null` for unknown ids (#33).
+
 ## 0.2.4
 
 ### Patch Changes
