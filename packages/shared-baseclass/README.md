@@ -54,18 +54,24 @@ types). No runtime dependencies; works in browsers, Node and workers.
 ### API surface
 
 - `BaseClass` — `onUpdate(cb): () => void` (an arrow property, so it can be
-  passed around unbound), `notify()`, `toJSON()`, `fromJSON(obj): this`.
+  passed around unbound; listeners are deduplicated by reference, see
+  [Notification model](#notification-model)), `notify()`, `toJSON()`,
+  `fromJSON(obj): this`.
 - `onChange(onUpdate, callback, getValue): () => void` — call `callback` only
   when `getValue()` changes (strict equality).
 - `onChangeNotifier(onUpdate, getValue)` — same, returned as a reusable
   `(callback) => unsubscribe` function.
 - `waitFor(onUpdate, check): Promise<void>` — resolve once `check()` is true.
+  If `check()` throws, the promise rejects and the listener is removed.
 - `waitForValue(onUpdate, get): Promise<T>` — resolve with the first
-  non-`undefined` value of `get()`.
+  non-`undefined` value of `get()`. If `get()` throws, the promise rejects and
+  the listener is removed.
 - `waitForSettled(model): Promise<model>` — `waitFor` on `model.isSettled()`;
   the model must match the exported `Settleable` interface.
 - `readValues(onUpdate, read): AsyncGenerator<T>` — yield every
-  non-`undefined` value of `read()`, re-reading after each update.
+  non-`undefined` value of `read()`, re-reading after each update. `break`,
+  `return()` and `throw()` end it and unsubscribe, even while a `next()` is
+  waiting for an update (that `next()` resolves `{ done: true }`).
 
 ## Examples
 
@@ -161,6 +167,7 @@ class Model extends BaseClass {
 const m = new Model();
 m.toJSON();   // { name: "alice", score: 0 } — drops underscore-prefixed fields and methods
 m.fromJSON({ score: 5 }); // mutates and notifies if any property actually changed
+m.fromJSON({ _internal: "x", notify: 1 }); // ignored: private field and method
 ```
 
 ## Internals
@@ -168,8 +175,11 @@ m.fromJSON({ score: 5 }); // mutates and notifies if any property actually chang
 ### Notification model
 
 `BaseClass` holds a `Set<() => void>` of listeners. `notify()` iterates the
-set synchronously. Listener disposal removes from the set. Re-registering the
-same function reference is a Set-dedup no-op. `notify()` does not pass a
+set synchronously. Listener disposal removes from the set. Listeners are
+deduplicated by reference: re-registering the same function is a no-op, so two
+subscribers passing the same function share one entry and the first disposer
+removes it for both. Pass distinct functions (for example `() => cb()`) when
+subscriptions must be independent. `notify()` does not pass a
 "changed key" — it is a fire-and-forget pulse, and derivers use
 `onChange`/`waitFor` to extract semantic change information.
 
@@ -187,7 +197,11 @@ only if something changed.
 
 `toJSON` enumerates own enumerable properties, drops methods (`typeof ===
 "function"`) and underscore-prefixed fields (treated as private). `fromJSON`
-assigns each key with strict-equality skip-if-same; if no key actually
+mirrors it: it ignores `__proto__`, `constructor`, `prototype`,
+underscore-prefixed keys and keys whose current value is a function (methods,
+`onUpdate`), so a parsed JSON payload cannot replace the prototype, the
+listener set or the API. Other keys, including ones the instance does not have
+yet, are assigned with strict-equality skip-if-same; if no key actually
 changes, `notify()` is not called.
 
 ### Constraints
@@ -199,7 +213,11 @@ changes, `notify()` is not called.
 
 - No deep observability — only the top-level `notify()` pulse.
 - Listeners run synchronously; an exception in one listener throws into the
-  caller of `notify()`. Catch in the listener if needed.
+  caller of `notify()`. Catch in the listener if needed. The listeners that
+  `waitFor` / `waitForValue` register catch their own errors and reject the
+  promise instead.
+- `waitFor` / `waitForValue` accept sources whose `onUpdate` calls the
+  callback synchronously on subscribe.
 - `readValues` requires the `read()` function to mark consumption itself
   (typically by clearing the field after returning a non-undefined value),
   since the package has no notion of "consumed".

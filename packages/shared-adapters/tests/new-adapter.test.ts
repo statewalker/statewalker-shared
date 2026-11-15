@@ -100,3 +100,81 @@ describe("newAdapter — hierarchical lookup", () => {
     expect(root).not.toHaveProperty("h");
   });
 });
+
+describe("newAdapter — own properties only (#39)", () => {
+  it("does not return Object.prototype members for keys like 'constructor'", () => {
+    const [getCtor] = newAdapter<unknown>("constructor");
+    const [getToString] = newAdapter<unknown>("toString");
+    expect(getCtor({}, true)).toBeUndefined();
+    expect(getToString({}, true)).toBeUndefined();
+    expect(() => getCtor({})).toThrow("Adapter not found: constructor");
+  });
+
+  it("runs the factory instead of returning a prototype member", () => {
+    const [get] = newAdapter<string>("toString", () => "made");
+    const ctx: Record<string, unknown> = {};
+    expect(get(ctx)).toBe("made");
+    expect(Object.hasOwn(ctx, "toString")).toBe(true);
+  });
+
+  it("remove does not touch inherited properties", () => {
+    const [, , remove] = newAdapter<unknown>("k");
+    const proto = { k: "inherited" };
+    const ctx = Object.create(proto) as Record<string, unknown>;
+    remove(ctx);
+    expect(proto.k).toBe("inherited");
+  });
+});
+
+describe("newAdapter — parent cycles (#39)", () => {
+  it("stops on a parent cycle instead of looping forever", () => {
+    const [get] = newAdapter<string>("h");
+    const a: Record<string, unknown> = {};
+    const b: Record<string, unknown> = { parent: a };
+    a.parent = b;
+    expect(get(a, true)).toBeUndefined();
+    expect(() => get(b)).toThrow("Adapter not found: h");
+  });
+
+  it("still finds a value inside the cycle, and creates when absent", () => {
+    const [get, set] = newAdapter<string>("h");
+    const a: Record<string, unknown> = {};
+    const b: Record<string, unknown> = { parent: a };
+    a.parent = b;
+    set(b, "in-b");
+    expect(get(a)).toBe("in-b");
+
+    const [getMade] = newAdapter<string>("m", () => "made");
+    const self: Record<string, unknown> = {};
+    self.parent = self;
+    expect(getMade(self)).toBe("made");
+  });
+});
+
+describe("newAdapter — storing undefined (#39)", () => {
+  it("set(ctx, undefined) counts as missing: get throws or returns undefined", () => {
+    const [get, set] = newAdapter<string | undefined>("u");
+    const ctx: Record<string, unknown> = {};
+    set(ctx, undefined);
+    expect(Object.hasOwn(ctx, "u")).toBe(true);
+    expect(get(ctx, true)).toBeUndefined();
+    expect(() => get(ctx)).toThrow("Adapter not found: u");
+  });
+
+  it("set(ctx, undefined) does not shadow a parent's value", () => {
+    const [get, set] = newAdapter<string | undefined>("u");
+    const root: Record<string, unknown> = {};
+    const child: Record<string, unknown> = { parent: root };
+    set(root, "from-root");
+    set(child, undefined);
+    expect(get(child)).toBe("from-root");
+  });
+
+  it("set(ctx, undefined) lets the factory run and replace it", () => {
+    const [get, set] = newAdapter<string | undefined>("u", () => "made");
+    const ctx: Record<string, unknown> = {};
+    set(ctx, undefined);
+    expect(get(ctx)).toBe("made");
+    expect(ctx.u).toBe("made");
+  });
+});
