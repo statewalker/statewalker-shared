@@ -20,9 +20,11 @@ This package centralises that bridge:
 
 - Producer-facing API is `(next, done)` plus an optional cleanup return.
 - Consumer-facing API is a vanilla `for await … of`.
-- `next` / `done` return promises that resolve `true` once the value was
-  actually yielded (or `false` if the generator was closed without yielding
-  it) — producers can implement backpressure or skip-stale strategies.
+- `next` / `done` return promises that resolve `true` once the consumer is
+  done with the value: when it pulls the *following* value or ends the
+  iteration (`false` if the generator was closed without yielding it, or if
+  the value was skipped) — producers can implement backpressure or skip-stale
+  strategies.
 - `skipValues` mode replaces the queue with single-slot "latest wins"
   semantics for UI-style streams where only the last update matters.
 
@@ -62,7 +64,11 @@ types). No runtime dependencies; works in browsers, Node and workers.
 - `newAsyncGenerator<T, E = Error>(init, skipValues = false): AsyncGenerator<T>`
   — `init(next, done)` receives `next(value): Promise<boolean>` and
   `done(error?): Promise<boolean>` and may return a cleanup function (sync or
-  async).
+  async). `init` may itself be async and resolve to the cleanup function. A
+  synchronous throw from `init`, or a rejection of the promise it returns, is
+  passed to `done(error)`, so the consumer receives it. `init` runs lazily, on
+  the first pull of the generator, not when `newAsyncGenerator()` is called;
+  calling `return()` before the first pull never runs it.
 - `newAsyncGeneratorFunction<T>(listen): () => AsyncGenerator<T>` — wraps
   `newAsyncGenerator`; `listen(next)` gets only `next` and may return a sync
   cleanup function. Each call of the returned function starts a new
@@ -116,17 +122,39 @@ whether their value reached the consumer.
 
 ### Skip-stale variant
 
-With `skipValues = true`, each new `next(...)` drains the queue before
-enqueuing the new slot — older pending values resolve with `false`. This
+With `skipValues = true`, each new `next(...)` drops the pending values before
+enqueuing the new slot — older pending values resolve with `false`. `done()`
+never drops anything: the last value queued before it is still delivered, and
+a `done(error)` is still thrown. This
 gives O(1) memory regardless of producer rate, matching the "discard
 intermediate, keep latest" pattern used by UI rendering pipelines.
 
 ### Cleanup
 
-The init function may return a cleanup callback (sync or async). It runs in
-the generator's `finally` — on normal completion, on consumer-side
-`return()` / `break`, or on consumer-side error. Pending queue slots are
-drained (resolving with `false`) at the same point.
+The init function may return a cleanup callback (sync or async), or resolve
+to one when it is async. It runs in the generator's `finally` — on normal
+completion, on consumer-side `return()` / `break`, or on consumer-side error.
+Pending queue slots are drained (resolving with `false`) right after it, even
+when the cleanup throws.
+
+If the cleanup throws while the generator is ending with an error (from
+`done(error)` or a consumer-side `throw()`), the consumer still receives the
+original error; the cleanup error is attached as its `cause` when the
+original error is an object without a `cause` (otherwise it is dropped). When
+the generator ends without an error, the cleanup error is thrown to the
+consumer (from `return()` or the final `next()`).
+
+If an async `init` resolves its cleanup only after the generator has
+finished, the cleanup is called at once; its error is ignored, since no
+consumer is left to receive it.
+
+### Cancellation
+
+`return()` (and `break` in `for await`) ends the generator even while the
+consumer is waiting for a value from an idle producer: the pending `next()`
+settles with `{ done: true }`, the cleanup runs, and pending producers resolve
+with `false`. A consumer-side `throw()` has no such shortcut: like any native
+async generator, it waits behind a pending `next()`.
 
 ### Constraints
 
@@ -136,7 +164,10 @@ drained (resolving with `false`) at the same point.
   waiting forever. Only the consumer (`break`, `return()`) or `done()` ends
   the loop.
 - `done(error)` causes the generator to throw the supplied error to the
-  consumer. With no error, it completes normally.
+  consumer. With no error, or with `undefined` or `null` (as from a
+  Node-style callback), it completes normally.
+- Once `done()` is queued, later `next()` / `done()` calls resolve `false`
+  at once.
 - `newAsyncGeneratorFunction` exposes only the `next` callback to its
   listen function; producers that need the `done` channel should use
   `newAsyncGenerator` directly.
