@@ -96,6 +96,44 @@ describe("readValues", () => {
     expect(reads).toBe(2);
   });
 
+  describe("a throwing read() reaches the consumer (#59 review)", () => {
+    function setup(failOn: number) {
+      const box = new BaseClass();
+      let reads = 0;
+      let cleaned = false;
+      const onUpdate = (cb: () => void) => {
+        const unsub = box.onUpdate(cb);
+        return () => {
+          cleaned = true;
+          unsub();
+        };
+      };
+      const iter = readValues(onUpdate, () => {
+        reads++;
+        if (reads === failOn) throw new Error(`read ${reads} failed`);
+        return reads === 1 ? 1 : undefined;
+      });
+      return { box, iter, isCleaned: () => cleaned };
+    }
+
+    it("on the first read: next() rejects and the listener is removed", async () => {
+      const { iter, isCleaned } = setup(1);
+      await expect(iter.next()).rejects.toThrow("read 1 failed");
+      expect(isCleaned()).toBe(true);
+      expect((await iter.next()).done).toBe(true);
+    });
+
+    it("on a read after a notification: the waiting next() rejects", async () => {
+      const { box, iter, isCleaned } = setup(3);
+      expect((await iter.next()).value).toBe(1);
+      const pending = iter.next();
+      await settle();
+      box.notify();
+      await expect(pending).rejects.toThrow("read 3 failed");
+      expect(isCleaned()).toBe(true);
+    });
+  });
+
   describe("return() while the consumer waits for a value (#34)", () => {
     function setup() {
       class Box extends BaseClass {

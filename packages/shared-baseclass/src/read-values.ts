@@ -11,6 +11,8 @@ import { newAsyncGenerator } from "@statewalker/shared-generators";
  * The callback is registered on the first `next()` and removed when the generator ends. `return()`
  * and `throw()` end the generator even while a `next()` is waiting for a notification: the pending
  * `next()` resolves `{ done: true }`, the callback is removed, and `read` is not called again.
+ * If `read` throws, the generator ends with that error: the consumer's `next()` rejects with it
+ * and the callback is removed.
  *
  * @param onUpdate A function that registers a callback to be called whenever the object updates. It returns a cleanup function to unregister the callback.
  * @param read A function that returns a value to yield.
@@ -23,7 +25,7 @@ export function readValues<R>(
 ): AsyncGenerator<R> {
   let closed = false;
 
-  const gen = newAsyncGenerator<R>((next) => {
+  const gen = newAsyncGenerator<R>((next, done) => {
     let pumping = false;
     let notified = false;
     // Reads and hands over values until `read` returns undefined; each
@@ -39,6 +41,11 @@ export function readValues<R>(
             if (!(await next(value))) return;
           }
         }
+      } catch (error) {
+        // A throwing `read` ends the generator: the consumer's `next()`
+        // rejects with the error and the callback is removed.
+        closed = true;
+        void done(error as Error);
       } finally {
         pumping = false;
       }
