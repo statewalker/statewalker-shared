@@ -40,6 +40,14 @@ export function newRegistry<E = unknown>(
     }
   }
 
+  function deferred(): { promise: Promise<void>; resolve: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
   function newest(): (() => Promise<void>) | undefined {
     let result: (() => Promise<void>) | undefined;
     for (const registration of registrations.values()) result = registration;
@@ -52,13 +60,18 @@ export function newRegistry<E = unknown>(
       let promise: Promise<void> | undefined;
       const dispose = (): Promise<void> => {
         if (!promise) {
-          promise = (async () => {
+          // Assign the memo before the listener runs: a listener may call its own disposer
+          // synchronously (directly or through a callback it triggers) and must get this promise.
+          const { promise: done, resolve } = deferred();
+          promise = done;
+          void (async () => {
             try {
               await listener?.();
             } catch (e) {
               reportError(e);
             } finally {
               registrations.delete(id);
+              resolve();
             }
           })();
         }
@@ -68,18 +81,23 @@ export function newRegistry<E = unknown>(
       return dispose;
     },
     function cleanup(): Promise<void> {
-      if (!cleanupInFlight) {
-        cleanupInFlight = (async () => {
-          try {
-            for (let registration = newest(); registration; registration = newest()) {
-              await registration();
-            }
-          } finally {
-            cleanupInFlight = undefined;
+      if (cleanupInFlight) return cleanupInFlight;
+      // Assigned before the first listener runs, so a listener calling cleanup() re-enters
+      // nothing and gets this promise. Return the local: with nothing registered, the sweep
+      // below finishes synchronously and has already cleared `cleanupInFlight`.
+      const { promise: done, resolve } = deferred();
+      cleanupInFlight = done;
+      void (async () => {
+        try {
+          for (let registration = newest(); registration; registration = newest()) {
+            await registration();
           }
-        })();
-      }
-      return cleanupInFlight;
+        } finally {
+          cleanupInFlight = undefined;
+          resolve();
+        }
+      })();
+      return done;
     },
   ];
 }

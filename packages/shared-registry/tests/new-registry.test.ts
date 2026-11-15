@@ -224,4 +224,64 @@ describe("newRegistry", () => {
       expect(log).toEqual(["second", "late", "first"]);
     });
   });
+  describe("synchronous re-entry from a listener (PR #49 review)", () => {
+    it("a listener whose teardown synchronously fires its own disposer runs once", async () => {
+      const [register, cleanup] = newRegistry();
+      const conn = {
+        onclose: undefined as (() => void) | undefined,
+        close: vi.fn(() => conn.onclose?.()),
+      };
+      const unregister = register(() => conn.close());
+      conn.onclose = () => {
+        void unregister();
+      };
+      await cleanup();
+      expect(conn.close).toHaveBeenCalledOnce();
+    });
+
+    it("a listener calling its own disposer without awaiting runs once", async () => {
+      const [register] = newRegistry();
+      const listener = vi.fn(() => {
+        void off();
+      });
+      const off = register(listener);
+      await off();
+      expect(listener).toHaveBeenCalledOnce();
+    });
+
+    it("a listener calling cleanup() without awaiting runs once", async () => {
+      const [register, cleanup] = newRegistry();
+      const listener = vi.fn(() => {
+        void cleanup();
+      });
+      register(listener);
+      await cleanup();
+      expect(listener).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("an onError returning a rejected promise is reported and cleanup continues", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const ran: string[] = [];
+      const [register, cleanup] = newRegistry((() => Promise.reject(new Error("logger down"))) as (
+        e: unknown,
+      ) => void);
+      register(() => {
+        ran.push("earlier");
+      });
+      register(() => {
+        throw new Error("boom");
+      });
+      await expect(cleanup()).resolves.toBeUndefined();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(ran).toEqual(["earlier"]);
+      expect(consoleError).toHaveBeenCalledOnce();
+      const [handlerError, original] = consoleError.mock.calls[0] ?? [];
+      expect((handlerError as Error).message).toBe("logger down");
+      expect((original as Error).message).toBe("boom");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
 });
