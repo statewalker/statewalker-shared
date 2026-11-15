@@ -259,6 +259,13 @@ the command counts as claimed at once, even when the output schema validates
 asynchronously, and later `resolve` / `reject` calls are ignored. A `resolve`
 with an invalid value settles it as a rejection.
 
+Every route goes through one lifecycle owned by the bus — pending, claimed
+(a listener returned `true` or a promise), validating (the first `resolve`
+arrived; the output schema runs once), settled — so a listener's direct
+`resolve` / `reject`, its returned promise, its throw and the caller's own
+`resolve` / `reject` follow the same rules. The command value exposes only
+`key`, `payload`, `settled` (read-only), `resolve`, `reject` and `promise`.
+
 `CommandsRegistry.create(...)` holds a `Map<string, CommandDeclaration>` and
 a `Set<() => void>` of `onUpdate` subscribers. Variadic `.set(...)` is
 atomic: keys are pre-checked for collision (different reference under same
