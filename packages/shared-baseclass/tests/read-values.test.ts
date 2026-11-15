@@ -73,4 +73,65 @@ describe("readValues", () => {
     await iter.return?.(undefined);
     expect(cleaned).toBe(true);
   });
+
+  describe("return() while the consumer waits for a value (#34)", () => {
+    function setup() {
+      class Box extends BaseClass {
+        v: number | undefined = undefined;
+      }
+      const box = new Box();
+      let cleaned = false;
+      const onUpdate = (cb: () => void) => {
+        const unsub = box.onUpdate(cb);
+        return () => {
+          cleaned = true;
+          unsub();
+        };
+      };
+      const iter = readValues(onUpdate, () => {
+        const v = box.v;
+        box.v = undefined;
+        return v;
+      });
+      return { box, iter, isCleaned: () => cleaned };
+    }
+
+    it("ends the pending next() and unsubscribes", async () => {
+      const { iter, isCleaned } = setup();
+      const pending = iter.next();
+      await Promise.resolve();
+      const ret = await iter.return(undefined);
+      expect(ret.done).toBe(true);
+      expect((await pending).done).toBe(true);
+      expect(isCleaned()).toBe(true);
+      expect((await iter.next()).done).toBe(true);
+    });
+
+    it("does not read or yield values notified after return()", async () => {
+      const { box, iter } = setup();
+      const pending = iter.next();
+      await Promise.resolve();
+      const ret = iter.return(undefined);
+      box.v = 5;
+      box.notify();
+      expect((await pending).done).toBe(true);
+      expect((await ret).done).toBe(true);
+      expect(box.v).toBe(5);
+    });
+
+    it("throw() while waiting rejects and unsubscribes", async () => {
+      const { iter, isCleaned } = setup();
+      const pending = iter.next();
+      await Promise.resolve();
+      await expect(iter.throw(new Error("stop"))).rejects.toThrow("stop");
+      expect((await pending).done).toBe(true);
+      expect(isCleaned()).toBe(true);
+    });
+
+    it("return() before the first next() never subscribes", async () => {
+      const { iter, isCleaned } = setup();
+      expect((await iter.return(undefined)).done).toBe(true);
+      expect(isCleaned()).toBe(false);
+    });
+  });
 });
