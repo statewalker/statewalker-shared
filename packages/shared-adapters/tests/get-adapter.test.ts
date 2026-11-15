@@ -31,3 +31,19 @@ describe("getAdapter", () => {
     expect(get(child)).toEqual({ n: 99 });
   });
 });
+
+describe("getAdapter — default getParent (#39)", () => {
+  it("does not inherit through `parent` by default, unlike newAdapter", () => {
+    const [get] = getAdapter<{ n: number }>("k", () => ({ n: 0 }));
+    const root: Record<string, unknown> = { k: { n: 99 } };
+    const child: Record<string, unknown> = { parent: root };
+    expect(get(child)).toEqual({ n: 0 });
+    expect(child.k).toEqual({ n: 0 });
+    expect(root.k).toEqual({ n: 99 });
+  });
+
+  it("does not return Object.prototype members", () => {
+    const [get] = getAdapter<string>("constructor", () => "made");
+    expect(get({})).toBe("made");
+  });
+});

@@ -268,3 +268,229 @@ describe("defineKeyedSlot", () => {
     expect(Object.isFrozen(decl)).toBe(true);
   });
 });
+
+describe("Slots — disposer idempotence (#21)", () => {
+  interface Item {
+    label: string;
+  }
+  const plain = defineSlot<Item>("idem:plain");
+  const keyed = defineKeyedSlot<Item>("idem:keyed");
+
+  it("plain: a stale disposer does not remove a later provide of the same value", () => {
+    const slots = new Slots();
+    const v: Item = { label: "v" };
+    const p1 = slots.provide(plain, v);
+    p1();
+    slots.provide(plain, v);
+    p1();
+    expect(slots.getSnapshot(plain)).toEqual([v]);
+  });
+
+  it("plain: calling a disposer twice notifies once", () => {
+    const slots = new Slots();
+    const v: Item = { label: "v" };
+    const p1 = slots.provide(plain, v);
+    const cb = vi.fn();
+    slots.observe(plain, cb);
+    cb.mockClear();
+    p1();
+    p1();
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("plain: a deduped disposer from an earlier provide cycle is a no-op", () => {
+    const slots = new Slots();
+    const v: Item = { label: "v" };
+    const p1 = slots.provide(plain, v);
+    const p2 = slots.provide(plain, v); // deduped
+    p1(); // removes v (plain slots are not ref-counted)
+    slots.provide(plain, v); // a fresh contribution
+    p2(); // belongs to the earlier contribution
+    expect(slots.getSnapshot(plain)).toEqual([v]);
+  });
+
+  it("keyed: a stale disposer does not remove a later registration under the same id", () => {
+    const slots = new Slots();
+    const a: Item = { label: "A" };
+    const b: Item = { label: "B" };
+    const dA = slots.register(keyed, "id", a);
+    dA();
+    slots.register(keyed, "id", b);
+    dA();
+    expect(slots.get(keyed, "id")).toBe(b);
+  });
+
+  it("keyed: a stale disposer does not remove a later registration of the same value", () => {
+    const slots = new Slots();
+    const a: Item = { label: "A" };
+    const dA = slots.register(keyed, "id", a);
+    dA();
+    slots.register(keyed, "id", a);
+    dA();
+    expect(slots.get(keyed, "id")).toBe(a);
+  });
+
+  it("keyed: calling one disposer twice does not release another registration", () => {
+    const slots = new Slots();
+    const v: Item = { label: "v" };
+    const d1 = slots.register(keyed, "id", v);
+    const d2 = slots.register(keyed, "id", v);
+    d1();
+    d1();
+    expect(slots.get(keyed, "id")).toBe(v);
+    d2();
+    expect(slots.get(keyed, "id")).toBeNull();
+  });
+});
+
+describe("Slots — observer robustness (#33)", () => {
+  interface Item {
+    label: string;
+  }
+  const plain = defineSlot<Item>("obs:plain");
+  const keyed = defineKeyedSlot<Item>("obs:keyed");
+
+  it("keyed snapshot cannot be mutated through a cast", () => {
+    const slots = new Slots();
+    const v: Item = { label: "v" };
+    slots.register(keyed, "a", v);
+    const snap = slots.getSnapshot(keyed) as unknown as Map<string, Item>;
+    expect(() => snap.set("evil", { label: "evil" })).toThrow();
+    expect(() => snap.delete("a")).toThrow();
+    expect(() => snap.clear()).toThrow();
+    expect(slots.getSnapshot(keyed).has("evil")).toBe(false);
+    expect(slots.getSnapshot(keyed).get("a")).toBe(v);
+  });
+
+  it("keyed snapshot behaves as a ReadonlyMap", () => {
+    const slots = new Slots();
+    const a: Item = { label: "a" };
+    const b: Item = { label: "b" };
+    slots.register(keyed, "a", a);
+    slots.register(keyed, "b", b);
+    const snap = slots.getSnapshot(keyed);
+    expect(snap.size).toBe(2);
+    expect(snap.has("a")).toBe(true);
+    expect([...snap]).toEqual([
+      ["a", a],
+      ["b", b],
+    ]);
+    expect([...snap.keys()]).toEqual(["a", "b"]);
+    expect([...snap.values()]).toEqual([a, b]);
+    expect([...snap.entries()]).toEqual([
+      ["a", a],
+      ["b", b],
+    ]);
+    const seen: string[] = [];
+    snap.forEach((value, id, map) => {
+      expect(map).toBe(snap);
+      seen.push(`${id}=${value.label}`);
+    });
+    expect(seen).toEqual(["a=a", "b=b"]);
+  });
+
+  it("plain: an observer added during a notification is not called twice in that pass", () => {
+    const slots = new Slots();
+    const late = vi.fn();
+    let armed = false;
+    slots.observe(plain, () => {
+      if (!armed) return;
+      armed = false;
+      slots.observe(plain, late);
+    });
+    armed = true;
+    slots.provide(plain, { label: "v" });
+    // Called once by its own immediate snapshot, not again by the ongoing pass.
+    expect(late).toHaveBeenCalledTimes(1);
+  });
+
+  it("keyed: an observer added during a notification is not called twice in that pass", () => {
+    const slots = new Slots();
+    const late = vi.fn();
+    let armed = false;
+    slots.observe(keyed, () => {
+      if (!armed) return;
+      armed = false;
+      slots.observe(keyed, late);
+    });
+    armed = true;
+    slots.register(keyed, "a", { label: "v" });
+    expect(late).toHaveBeenCalledTimes(1);
+  });
+
+  it("an observer removed during a notification is not called later in that pass", () => {
+    const slots = new Slots();
+    const second = vi.fn();
+    let off: () => void = () => {};
+    slots.observe(plain, () => off());
+    off = slots.observe(plain, second);
+    second.mockClear();
+    slots.provide(plain, { label: "v" });
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it("plain observers receive the frozen cached snapshot", () => {
+    const slots = new Slots();
+    const seen: (readonly Item[])[] = [];
+    slots.observe(plain, (values) => seen.push(values));
+    slots.provide(plain, { label: "v" });
+    expect(seen).toHaveLength(2);
+    for (const values of seen) expect(Object.isFrozen(values)).toBe(true);
+    expect(seen[1]).toBe(slots.getSnapshot(plain));
+  });
+
+  it("all plain observers of one pass see the same unmodifiable array", () => {
+    const slots = new Slots();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const a: Item = { label: "a" };
+      const b: Item = { label: "b" };
+      slots.provide(plain, b);
+      const received: (readonly Item[])[] = [];
+      slots.observe(plain, (values) => {
+        (values as Item[]).sort((x, y) => x.label.localeCompare(y.label));
+      });
+      slots.observe(plain, (values) => received.push(values));
+      received.length = 0;
+      slots.provide(plain, a);
+      expect(received[0]).toEqual([b, a]);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("keyed observers receive the cached snapshot", () => {
+    const slots = new Slots();
+    const seen: ReadonlyMap<string, Item>[] = [];
+    slots.observe(keyed, (entries) => seen.push(entries));
+    slots.register(keyed, "a", { label: "v" });
+    expect(seen[1]).toBe(slots.getSnapshot(keyed));
+  });
+
+  it("observing the same callback twice keeps one subscription per call", () => {
+    const slots = new Slots();
+    const cb = vi.fn();
+    const off1 = slots.observe(plain, cb);
+    slots.observe(plain, cb);
+    off1();
+    cb.mockClear();
+    slots.provide(plain, { label: "v" });
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("keyed: observing the same callback twice keeps one subscription per call", () => {
+    const slots = new Slots();
+    const cb = vi.fn();
+    const off1 = slots.observe(keyed, cb);
+    const off2 = slots.observe(keyed, cb);
+    off1();
+    off1();
+    cb.mockClear();
+    slots.register(keyed, "a", { label: "v" });
+    expect(cb).toHaveBeenCalledTimes(1);
+    off2();
+    cb.mockClear();
+    slots.register(keyed, "b", { label: "w" });
+    expect(cb).not.toHaveBeenCalled();
+  });
+});

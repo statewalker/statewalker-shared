@@ -78,18 +78,39 @@ function log(instance: pino.Logger, level: LoggerLevel, args: unknown[]) {
   }
   const [first, ...rest] = args;
   if (typeof first === "string") {
-    instance[level]({ extra: rest.length === 1 ? rest[0] : rest }, first);
+    // pino serializes an Error only under `err` (an Error's own properties are not
+    // enumerable, so anywhere else it becomes `{}`): move the first Error there and
+    // serialize any others in place.
+    const errIndex = rest.findIndex((value) => value instanceof Error);
+    const err = errIndex >= 0 ? rest[errIndex] : undefined;
+    const others = (errIndex >= 0 ? rest.filter((_, i) => i !== errIndex) : rest).map(serialize);
+    const fields: Record<string, unknown> = {};
+    if (err !== undefined) fields.err = err;
+    if (others.length > 0) fields.extra = others.length === 1 ? others[0] : others;
+    instance[level](fields, first);
   } else {
-    instance[level]({ args });
+    instance[level]({ args: args.map(serialize) });
   }
 }
+
+function serialize(value: unknown): unknown {
+  return value instanceof Error ? pino.stdSerializers.err(value) : value;
+}
+
+/** Levels accepted from `LOG_LEVEL`: the `Logger` levels plus pino's `silent`. */
+const KNOWN_LEVELS = new Set(["fatal", "error", "warn", "info", "debug", "trace", "silent"]);
 
 export default async function initServiceLogger(
   context: Record<string, unknown>,
 ): Promise<() => Promise<void>> {
-  const level = (process.env.LOG_LEVEL ?? "info") as LoggerLevel;
+  const requested = (process.env.LOG_LEVEL || "info").toLowerCase();
+  const known = KNOWN_LEVELS.has(requested);
+  const level = (known ? requested : "info") as LoggerLevel;
   const logger = newPinoLogger(level, { processId: getProcessId(context) });
   setLogger(context, logger);
+  if (!known) {
+    logger.warn(`[service-logger] Unknown LOG_LEVEL "${process.env.LOG_LEVEL}", using "info"`);
+  }
   logger.info("[service-logger] Pino logger initialized");
   context.logger = logger.info;
   return async () => {};

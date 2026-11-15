@@ -1,4 +1,4 @@
-# Dependabot version updates: weekly pull requests, checked by CI and merged by hand.
+# Dependabot version updates: weekly pull requests, checked by CI and merged through the merge gate.
 version: 2
 updates:
   # Dependencies, pnpm catalogs included. A version that still fits its range only moves the
@@ -15,8 +15,9 @@ updates:
       default-days: 3
     open-pull-requests-limit: 10
     groups:
-      # Internal packages are normally updated by the local release script right after a
-      # release; this group catches whatever it missed.
+      # statewalker-shared is layer L0: its packages depend on each other only through
+      # `workspace:^` and on no outside @statewalker/* package, so this group matches nothing
+      # today. It is a safety net should such a dependency be added.
       statewalker:
         patterns: ["@statewalker/*"]
       external-minor-patch:

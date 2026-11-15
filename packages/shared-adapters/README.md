@@ -63,6 +63,13 @@ types). No runtime dependencies; works in browsers, Node and workers.
   `create` is required, and `getParent` defaults to "no parent" (no
   inheritance), unlike `newAdapter`.
 
+> **The two entry points walk parents differently by default.** With the same
+> key and a context `{ parent: root }` where only `root` holds a value,
+> `newAdapter`'s `get` returns the value from `root`, while `getAdapter`'s
+> `get` ignores `root` and creates a new value on the context. Pass
+> `getParent` explicitly (e.g. `(ctx) => ctx.parent`) to `getAdapter` when
+> you want inheritance, or `() => undefined` to `newAdapter` when you do not.
+
 ## Examples
 
 ### Read-only adapter that throws when unset
@@ -128,7 +135,12 @@ removeCache(ctx); // the next getCache(ctx) creates a fresh Map
 ### Lookup algorithm
 
 `get(context)` walks ancestors via `getParent` and returns the first value
-found under the adapter's key that is not `undefined`. If none is found and a `create` factory
+found under the adapter's key that is not `undefined`. Only own properties
+count (`Object.hasOwn`): inherited members such as `Object.prototype.toString`
+are never returned, and a context created with `Object.create(other)` does not
+inherit `other`'s values through the prototype chain (use `getParent` for
+that). Each context is visited at most once, so a cyclic parent chain ends
+the walk instead of looping forever. If none is found and a `create` factory
 was supplied, the factory runs and the value is cached on the **original**
 context (not on the ancestor that triggered the lookup). Otherwise `get`
 throws — unless called with `optional = true`, in which case it returns
@@ -136,7 +148,8 @@ throws — unless called with `optional = true`, in which case it returns
 
 ### Defaults
 
-- `getParent` defaults to reading `context.parent` if it exists.
+- `newAdapter`'s `getParent` defaults to reading `context.parent` if it
+  exists; `getAdapter`'s defaults to no parent at all.
 - Without `create`, missing values throw on `get` (or return `undefined` with
   `optional = true`).
 - Cached factory output lives on the context object itself, so the lifetime
@@ -148,7 +161,8 @@ throws — unless called with `optional = true`, in which case it returns
   Pass `optional = true` to get `undefined` instead.
 - A value of `undefined` counts as missing: storing `undefined` with `set`
   makes `get` keep searching the parents (and then throw or create).
-
+- `remove` deletes only the context's own property; it never touches an
+  ancestor or a prototype.
 - Adapter keys are flat strings. Use `domain:name` (e.g. `app:logger`,
   `api:files`) to avoid collisions when many fragments share one context.
 - The context must be a non-null, writable object. On primitives `set` and
