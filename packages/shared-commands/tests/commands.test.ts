@@ -60,7 +60,8 @@ describe("Commands — dispatch lifecycle", () => {
       },
       { priority: -1 },
     );
-    commands.listen(PingCommand, () => Promise.resolve({ y: "ok" }), { priority: 1 });
+    // The claimer runs last: a claim stops the dispatch (#60).
+    commands.listen(PingCommand, () => Promise.resolve({ y: "ok" }), { priority: -2 });
 
     await commands.call(PingCommand, { x: 1 }).promise;
     expect(order).toEqual(["high", "default", "low"]);

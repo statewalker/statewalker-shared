@@ -270,3 +270,151 @@ describe("#32 builder stages are immutable", () => {
     expect(() => labelled.label("again")).toThrow("label already set");
   });
 });
+
+describe("#60 a claim stops the dispatch", () => {
+  const Claim = Command.required("claim:k")
+    .input(passthrough<{ id: string }>())
+    .output(passthrough<string>())
+    .build();
+
+  it("a higher-priority listener returning `true` keeps lower-priority listeners from running", async () => {
+    const commands = Commands.create();
+    const calls: string[] = [];
+    commands.listen(
+      Claim,
+      (cmd) => {
+        calls.push("claimer");
+        host.setTimeout(() => cmd.resolve("later"), 1);
+        return true;
+      },
+      { priority: 10 },
+    );
+    commands.listen(Claim, () => {
+      calls.push("lower");
+      return Promise.resolve("lower");
+    });
+    commands.listen(
+      Claim,
+      () => {
+        calls.push("observer");
+      },
+      { priority: -1 },
+    );
+    await expect(commands.call(Claim, { id: "a" }).promise).resolves.toBe("later");
+    expect(calls).toEqual(["claimer"]);
+  });
+
+  it("a higher-priority listener returning a promise keeps lower-priority listeners from running", async () => {
+    const commands = Commands.create();
+    const calls: string[] = [];
+    commands.listen(
+      Claim,
+      () => {
+        calls.push("claimer");
+        return Promise.resolve("high");
+      },
+      { priority: 10 },
+    );
+    commands.listen(Claim, () => {
+      calls.push("lower");
+      return Promise.resolve("lower");
+    });
+    await expect(commands.call(Claim, { id: "a" }).promise).resolves.toBe("high");
+    expect(calls).toEqual(["claimer"]);
+  });
+
+  it("a higher-priority observer still runs, then a lower-priority listener claims", async () => {
+    const commands = Commands.create();
+    const calls: string[] = [];
+    commands.listen(
+      Claim,
+      () => {
+        calls.push("observer");
+      },
+      { priority: 10 },
+    );
+    commands.listen(Claim, () => {
+      calls.push("claimer");
+      return Promise.resolve("claimed");
+    });
+    commands.listen(
+      Claim,
+      () => {
+        calls.push("fallback");
+        return Promise.resolve("fallback");
+      },
+      { priority: -1 },
+    );
+    await expect(commands.call(Claim, { id: "a" }).promise).resolves.toBe("claimed");
+    expect(calls).toEqual(["observer", "claimer"]);
+  });
+
+  it("a fallback fires only when no higher-priority listener claimed", async () => {
+    const commands = Commands.create();
+    const calls: string[] = [];
+    commands.listen(Claim, () => {
+      calls.push("observer");
+    });
+    commands.listen(
+      Claim,
+      () => {
+        calls.push("fallback");
+        return Promise.resolve("fallback");
+      },
+      { priority: -1 },
+    );
+    await expect(commands.call(Claim, { id: "a" }).promise).resolves.toBe("fallback");
+    expect(calls).toEqual(["observer", "fallback"]);
+  });
+
+  // The statewalker-sandbox apps/fm-protos scenarios, reduced: a host
+  // reroutes a command at a higher priority, and the default handler must
+  // not act on it as well.
+  it("a host reroute at a higher priority keeps the default handler from running", async () => {
+    const Delete = Command.required("files:delete")
+      .input(passthrough<{ path: string }>())
+      .output(passthrough<{ target: string }>())
+      .build();
+    const commands = Commands.create();
+    const jobs: string[] = [];
+    commands.listen(Delete, async (cmd) => ({ target: `trash:${cmd.payload.path}` }), {
+      priority: 10,
+    });
+    commands.listen(Delete, async (cmd) => {
+      jobs.push(cmd.payload.path);
+      return { target: "job-5" };
+    });
+    await expect(commands.call(Delete, { path: "/a" }).promise).resolves.toEqual({
+      target: "trash:/a",
+    });
+    expect(jobs).toEqual([]);
+  });
+
+  it("a host replacing a picker keeps the default picker from opening", async () => {
+    const Pick = Command.required("ui:pick")
+      .input(passthrough<void>())
+      .output(passthrough<string[]>())
+      .build();
+    const commands = Commands.create();
+    const opened: string[] = [];
+    commands.listen(
+      Pick,
+      (cmd) => {
+        opened.push("host");
+        host.setTimeout(() => cmd.resolve(["host-choice"]), 1);
+        return true;
+      },
+      { priority: 10 },
+    );
+    commands.listen(
+      Pick,
+      () => {
+        opened.push("default");
+        return true;
+      },
+      { priority: -1 },
+    );
+    await expect(commands.call(Pick, undefined).promise).resolves.toEqual(["host-choice"]);
+    expect(opened).toEqual(["host"]);
+  });
+});
