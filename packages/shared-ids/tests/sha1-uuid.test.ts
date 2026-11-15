@@ -32,17 +32,27 @@ describe("sha1Uuid", () => {
 describe("sha1Bytes", () => {
   it("hashes raw bytes equivalently to sha1Uuid on the same UTF-8 input", async () => {
     const text = "hello";
-    const bytesView = new TextEncoder().encode(text);
-    const bytes = new Uint8Array(
-      bytesView.buffer.slice(bytesView.byteOffset, bytesView.byteOffset + bytesView.byteLength),
-    ) as Uint8Array<ArrayBuffer>;
-    expect(await sha1Bytes(bytes)).toBe(await sha1Uuid(text));
+    expect(await sha1Bytes(new TextEncoder().encode(text))).toBe(await sha1Uuid(text));
   });
 
   it("returns a 40-character lowercase hex string", async () => {
-    const bytes = new Uint8Array([0, 1, 2, 3, 4]) as Uint8Array<ArrayBuffer>;
+    const bytes = new Uint8Array([0, 1, 2, 3, 4]);
     const hash = await sha1Bytes(bytes);
     expect(hash).toHaveLength(40);
     expect(hash).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("accepts any Uint8Array and hashes only the view's bytes (#37)", async () => {
+    const helloRef = "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d";
+    const hello = new TextEncoder().encode("hello");
+
+    const padded = new Uint8Array(hello.length + 4);
+    padded.set(hello, 2);
+    const view: Uint8Array = padded.subarray(2, 2 + hello.length);
+    expect(await sha1Bytes(view)).toBe(helloRef);
+
+    const shared = new Uint8Array(new SharedArrayBuffer(hello.length));
+    shared.set(hello);
+    expect(await sha1Bytes(shared)).toBe(helloRef);
   });
 });

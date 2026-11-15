@@ -26,9 +26,23 @@ function partsFromBigInt(id: bigint): SnowflakeParts {
   };
 }
 
-/** Parse a Crockford base32 encoded snowflake ID into its component parts. */
+/**
+ * Parse a Crockford base32 encoded snowflake ID into its component parts.
+ *
+ * @throws Error if the ID is not 13 characters, has invalid characters, or encodes a value
+ *   wider than 64 bits
+ */
 export function parseSnowflakeBase32(base32: string): SnowflakeParts {
-  return partsFromBigInt(crockfordDecode(base32));
+  if (base32.length !== SNOWFLAKE_BASE32_LENGTH) {
+    throw new Error(
+      `A base32 snowflake ID has ${SNOWFLAKE_BASE32_LENGTH} characters, got ${base32.length}`,
+    );
+  }
+  const id = crockfordDecode(base32);
+  if (id >> 64n !== 0n) {
+    throw new Error(`Snowflake ID '${base32}' encodes a value wider than 64 bits`);
+  }
+  return partsFromBigInt(id);
 }
 
 /** Parse a hex-encoded snowflake ID into its component parts (legacy format). */
