@@ -97,6 +97,14 @@ describe("newConsoleLogger", () => {
     }).toThrow(/Unknown log level/);
   });
 
+  it("setting an inherited Object property name as the level throws (#38)", () => {
+    const logger = newConsoleLogger("info");
+    expect(() => {
+      logger.level = "toString" as Logger["level"];
+    }).toThrow(/Unknown log level/);
+    expect(logger.level).toBe("info");
+  });
+
   it("level setter updates the active level", () => {
     const logger = newConsoleLogger("error");
     logger.info("filtered");
@@ -113,19 +121,77 @@ describe("getProcessId", () => {
     const a = getProcessId(ctx);
     const b = getProcessId(ctx);
     expect(a).toBe(b);
-    expect(a).toMatch(/^[0-9a-f]+$/);
+    expect(a).toMatch(/^[0-9a-f]{8}$/);
   });
 
   it("returns different ids for different contexts", () => {
     expect(getProcessId({})).not.toBe(getProcessId({}));
   });
+
+  it("always returns 8 hex characters (#38)", () => {
+    for (let i = 0; i < 200; i++) {
+      expect(getProcessId({})).toMatch(/^[0-9a-f]{8}$/);
+    }
+  });
+
+  it("keeps an id already stored on the context", () => {
+    const ctx: Record<string, unknown> = { "app.processId": "given" };
+    expect(getProcessId(ctx)).toBe("given");
+  });
 });
 
 describe("getLogger adapter", () => {
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  const originalLogLevel = process.env.LOG_LEVEL;
+
   beforeEach(() => {
-    vi.spyOn(console, "info").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    delete process.env.LOG_LEVEL;
   });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalLogLevel === undefined) delete process.env.LOG_LEVEL;
+    else process.env.LOG_LEVEL = originalLogLevel;
+  });
+
+  it("defaults to info and logs a start-up line naming this package (#38)", () => {
+    const logger = getLogger({});
+    expect(logger.level).toBe("info");
+    const line = infoSpy.mock.calls.map((call: unknown[]) => call[1]).join("\n");
+    expect(line).toContain("[shared-logger] Starting up with log level: info");
+    expect(line).not.toContain("[backbone]");
+  });
+
+  it("uses LOG_LEVEL from the environment", () => {
+    process.env.LOG_LEVEL = "error";
+    expect(getLogger({}).level).toBe("error");
+  });
+
+  it("treats an empty LOG_LEVEL as unset (#38)", () => {
+    process.env.LOG_LEVEL = "";
+    expect(getLogger({}).level).toBe("info");
+  });
+
+  it("accepts LOG_LEVEL in any case (#38)", () => {
+    process.env.LOG_LEVEL = "WARN";
+    expect(getLogger({}).level).toBe("warn");
+  });
+
+  it.each(["bogus", "silent", "toString"])(
+    "falls back to info with a warning on LOG_LEVEL=%s instead of throwing (#38)",
+    (value) => {
+      process.env.LOG_LEVEL = value;
+      let logger: Logger | undefined;
+      expect(() => {
+        logger = getLogger({});
+      }).not.toThrow();
+      expect(logger?.level).toBe("info");
+      const warning = warnSpy.mock.calls.map((call: unknown[]) => call[1]).join("\n");
+      expect(warning).toContain(`Unknown LOG_LEVEL "${value}"`);
+    },
+  );
 
   it("auto-creates a logger on first lookup", () => {
     const ctx: Record<string, unknown> = {};

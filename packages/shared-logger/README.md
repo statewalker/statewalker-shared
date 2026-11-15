@@ -49,8 +49,8 @@ types). Works in browsers, Node and workers.
   appended as the last argument.
 - `getLogger(ctx, optional?)`, `setLogger(ctx, logger)`, `removeLogger(ctx)` —
   context adapter.
-- `getProcessId(ctx)` — random ID stored on the context, used as `processId`
-  metadata.
+- `getProcessId(ctx)` — random 8-hex-character ID stored on the context
+  (from `crypto.randomUUID()` where available), used as `processId` metadata.
 - `newStateTracer(level = "info")` — returns `async (ctx) => close`; see
   below.
 
@@ -100,10 +100,13 @@ browser console has no separate fatal channel.
 `getLogger` / `setLogger` / `removeLogger` are built with `newAdapter` from
 `@statewalker/shared-adapters` under the key `app.logger`. They do not walk
 parent contexts. When no logger is set, `getLogger(ctx)` creates a console
-logger, sets its level from `process.env.LOG_LEVEL` (default `info`; the
-`process` lookup is guarded, so this also works in browsers), binds a
+logger, sets its level from `process.env.LOG_LEVEL` (case-insensitive;
+empty or unset means `info`; an unknown name logs a warning and falls back
+to `info`; the `process` lookup is guarded, so this also works in browsers),
+binds a
 `processId` stored on the context under `app.processId` (see
-`getProcessId`), and logs one `info` start-up line. To use another backend,
+`getProcessId`), and logs one `info` start-up line
+(`[shared-logger] Starting up with log level: …`). To use another backend,
 call `setLogger(ctx, …)` before any code calls `getLogger`.
 
 ### State tracer format
@@ -119,8 +122,11 @@ and renders as a tree in any text viewer.
   logger for a context. Subsequent env changes do not affect already-created
   loggers; mutate `logger.level` directly to change level at runtime.
 - Setting `logger.level` on a console logger to an unknown name throws
-  `Error: Unknown log level: <name>`. An invalid `LOG_LEVEL` value reaches
-  the same setter, so `getLogger(ctx)` throws it on first use.
+  `Error: Unknown log level: <name>`. An invalid `LOG_LEVEL` value does not
+  reach the setter: `getLogger(ctx)` warns and uses `info` instead.
+- The source needs no Node types: `process` and `crypto` are looked up on
+  `globalThis` with local types, so consumers resolving the `source` export
+  condition do not need `@types/node`.
 - `Logger` is intentionally minimal — no log destinations, no formatting
   configuration, no async drain. A pino backend ships separately as
   [`@statewalker/shared-logger-pino`](../shared-logger-pino).
