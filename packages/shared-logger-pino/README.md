@@ -32,7 +32,7 @@ One entry point, `@statewalker/shared-logger-pino` (ESM, `dist/index.js` with
 types):
 
 - default export `initServiceLogger(ctx): Promise<() => Promise<void>>` —
-  reads `process.env.LOG_LEVEL` (default `info`), creates
+  reads `process.env.LOG_LEVEL` (case-insensitive, default `info`), creates
   `newPinoLogger(level, { processId: getProcessId(ctx) })`, installs it with
   `setLogger`, logs `[service-logger] Pino logger initialized`, sets
   `ctx.logger` to the logger's `info` function, and returns a shutdown
@@ -103,10 +103,22 @@ The `Logger` interface takes any arguments; pino takes an optional object and
 a message.
 
 - one argument: passed to pino unchanged;
-- several arguments with a string first: the string is the message, the rest
-  goes to `{ extra }` (one value as is, several as an array);
+- several arguments with a string first: the string is the message; the
+  first `Error` among the rest goes to `{ err }` (pino's error serializer:
+  `type`, `message`, `stack`), and the other values go to `{ extra }` (one
+  value as is, several as an array);
 - several arguments with a non-string first: logged as `{ args: [...] }`;
 - no arguments: nothing is logged.
+
+Any other `Error` in `extra` or `args` is serialized with
+`pino.stdSerializers.err`, so its message and stack are kept (an `Error`'s
+own properties are not enumerable, so pino would otherwise write `{}`).
+
+```ts
+log.error("request failed", err, { userId });
+// {"level":"error","err":{"type":"Error","message":"…","stack":"…"},
+//  "extra":{"userId":…},"msg":"request failed",…}
+```
 
 ### Constraints
 
@@ -115,8 +127,9 @@ a message.
 - Call `initServiceLogger(ctx)` before the first `getLogger(ctx)`. If
   `getLogger` runs first, it caches the console logger on the context, and
   that logger stays in use until `setLogger` replaces it.
-- An unknown `LOG_LEVEL` is passed to pino, which throws at creation time
-  (`Error: default level:bogus must be included in custom levels`).
+- `LOG_LEVEL` accepts the `Logger` levels and pino's `silent`, in any
+  case; an empty value means `info`. An unknown value logs a warning and
+  falls back to `info`.
 - The shutdown function returned by `initServiceLogger` does nothing yet.
   Call it anyway so that flushing can be added without changing callers.
 - `ctx.logger` is overwritten with the logger's `info` function.
