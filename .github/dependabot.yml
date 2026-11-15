@@ -15,9 +15,9 @@ updates:
       default-days: 3
     open-pull-requests-limit: 10
     groups:
-      # Internal packages are normally updated right after a release by the lockfile-only pull
-      # requests of the release automation (statewalker-ci's statewalker-update.yml); this group
-      # catches whatever it missed.
+      # statewalker-shared is layer L0: its packages depend on each other only through
+      # `workspace:^` and on no outside @statewalker/* package, so this group matches nothing
+      # today. It is a safety net should such a dependency be added.
       statewalker:
         patterns: ["@statewalker/*"]
       external-minor-patch:
