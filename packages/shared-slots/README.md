@@ -50,7 +50,7 @@ export const coreViewsSlot =
 ### Entry point
 
 One entry point, `@statewalker/shared-slots` (ESM, `dist/index.js` with
-types). No runtime dependencies; works in browsers, Node and workers.
+types). Its one runtime dependency is `@statewalker/shared-baseclass`. It works in browsers, Node and workers.
 Exports `defineSlot`, `defineKeyedSlot`, `Slots`, and the types
 `SlotDeclaration` and `KeyedSlotDeclaration`.
 
@@ -175,7 +175,9 @@ without touching either the module or the host.
 
 ### Dependencies
 
-Zero dependencies.
+`@statewalker/shared-baseclass`: observers of each key share its `Notifier`,
+which holds the rules above (iterating a copy, error isolation, idempotent
+disposal, one snapshot per pass).
 
 ## License
 

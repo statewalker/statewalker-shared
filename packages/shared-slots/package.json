@@ -40,6 +40,9 @@
     "lint": "biome check --write .",
     "format": "biome format --write ."
   },
+  "dependencies": {
+    "@statewalker/shared-baseclass": "workspace:^"
+  },
   "devDependencies": {
     "rimraf": "catalog:",
     "tsdown": "catalog:",
