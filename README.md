@@ -114,9 +114,6 @@ changelog text for a package yourself.
 | `pnpm format` | `biome format --write .` |
 | `pnpm format:check` | `biome format .` |
 | `pnpm changeset` | add a changeset |
-| `pnpm version-packages` | `changeset version` |
-| `pnpm release-packages` | `changeset publish` |
-| `pnpm publish-all` | build and `pnpm -r publish --access public --no-git-checks` |
 
 Each package also has `dev` (`tsdown --watch`), `test:watch`, and `clean`.
 
