@@ -1,6 +1,5 @@
 packages:
   - "packages/*"
-  - "apps/*"
 
 catalog:
   "@changesets/cli": "^3.0.3"

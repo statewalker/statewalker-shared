@@ -50,7 +50,7 @@ export function defineSlot<T>(key: string): SlotDeclaration<T> {
  * registered value in O(1); `slots.observe(decl, cb)` notifies with a
  * `ReadonlyMap<string, T>` snapshot on each change.
  *
- * Indexing and version state for keyed slots live on the `Slots` bus
+ * Indexing and snapshot state for keyed slots live on the `Slots` bus
  * per slot key, so two fragments observing the same keyed slot share
  * the same cache.
  *

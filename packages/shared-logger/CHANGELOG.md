@@ -1,5 +1,13 @@
 # @statewalker/shared-logger
 
+## 0.1.5
+
+### Patch Changes
+
+- Release of the changes since the last published version:
+  
+  - files changed: dist/logger.adapter.js.map, dist/new-state-tracer.d.ts.map, dist/new-state-tracer.js.map, src/logger.adapter.ts, src/new-state-tracer.ts
+
 ## 0.1.4
 
 ### Patch Changes
