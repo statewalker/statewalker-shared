@@ -126,7 +126,6 @@ Each package also has `dev` (`tsdown --watch`), `test:watch`, and `clean`.
 | `tsconfig.base.json` | base compiler options; not extended by the packages, each `packages/*/tsconfig.json` is self-contained |
 | `turbo.json` | turbo task graph (`build` after dependencies' `build`); the root scripts use `pnpm -r`, which also builds in dependency order |
 | `.changeset/config.json` | changesets configuration (public access, base branch `main`) |
-| `.github/workflows/ci.yml` | CI checks |
-| `.github/workflows/release.yml` | changesets release job on `main` |
+| `.github/workflows/ci.yml` | CI checks, and the release: version pull request, pack, publish |
 | `packages/PACKAGE_README.template.md` | starting point for a new package README |
 | `LICENSE` | MIT license for all packages |
