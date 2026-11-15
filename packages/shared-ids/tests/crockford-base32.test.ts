@@ -33,6 +33,25 @@ describe("crockfordEncode", () => {
   });
 });
 
+describe("crockfordEncode range checks (#37)", () => {
+  it("throws on a value wider than 5 * length bits", () => {
+    expect(() => crockfordEncode(1n << 65n, 13)).toThrow(RangeError);
+    expect(() => crockfordEncode(32n, 1)).toThrow(RangeError);
+    expect(crockfordEncode(31n, 1)).toBe("Z");
+    expect(crockfordEncode((1n << 65n) - 1n, 13)).toBe("ZZZZZZZZZZZZZ");
+  });
+
+  it("throws on negative values", () => {
+    expect(() => crockfordEncode(-1n, 4)).toThrow(RangeError);
+  });
+
+  it("throws on an invalid length", () => {
+    expect(() => crockfordEncode(0n, -1)).toThrow(RangeError);
+    expect(() => crockfordEncode(0n, 1.5)).toThrow(RangeError);
+    expect(crockfordEncode(0n, 0)).toBe("");
+  });
+});
+
 describe("crockfordDecode", () => {
   it("decodes zero", () => {
     expect(crockfordDecode("0000000000000")).toBe(0n);
@@ -55,6 +74,10 @@ describe("crockfordDecode", () => {
     expect(crockfordDecode("I")).toBe(1n);
     expect(crockfordDecode("L")).toBe(1n);
     expect(crockfordDecode("l")).toBe(1n);
+  });
+
+  it("throws on an empty string (#37)", () => {
+    expect(() => crockfordDecode("")).toThrow(/empty/);
   });
 
   it("throws on invalid characters", () => {

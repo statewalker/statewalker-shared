@@ -16,10 +16,15 @@ export async function sha1Uuid(content: string): Promise<string> {
 }
 
 /**
- * Generate a SHA1 hash from raw bytes.
+ * Generate a SHA1 hash from raw bytes (any `Uint8Array`, including a Node `Buffer` or a view
+ * into a larger or shared buffer; only the view's bytes are hashed).
+ * The result is a lowercase hex string (40 characters).
  */
-export async function sha1Bytes(data: Uint8Array<ArrayBuffer>): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest("SHA-1", data);
+export async function sha1Bytes(data: Uint8Array): Promise<string> {
+  // Web Crypto rejects views over a SharedArrayBuffer; copy those into a plain ArrayBuffer.
+  const bytes =
+    data.buffer instanceof ArrayBuffer ? (data as Uint8Array<ArrayBuffer>) : new Uint8Array(data);
+  const hashBuffer = await crypto.subtle.digest("SHA-1", bytes);
   const hashArray = new Uint8Array(hashBuffer);
   return hexFromBytes(hashArray);
 }

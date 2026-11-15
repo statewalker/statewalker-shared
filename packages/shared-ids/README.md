@@ -51,18 +51,28 @@ Crypto API, so it works in browsers, Node and workers.
 - `SnowflakeId` — `new SnowflakeId({ epoch?, workerId?, now? })`, then
   `generate(): string` (13-character Crockford base32). Defaults: epoch
   `1609459200000` (2021-01-01T00:00:00Z), `workerId` `1`, `now` `Date.now`.
+  The constructor throws `RangeError` unless `workerId` is an integer 0-1023
+  and `epoch` is a safe integer; `generate()` throws `RangeError` if `now()`
+  is before the epoch, is not an integer, or the timestamp no longer fits in
+  42 bits.
 - `SnowflakeOptions`, `SnowflakeParts` (`{ timestamp, workerId, sequence }`) —
   types.
 - `SNOWFLAKE_BASE32_LENGTH` — `13`.
 - `parseSnowflake(id)` — auto-detects the format (see below).
 - `parseSnowflakeBase32(id)`, `parseSnowflakeHex(id)`, `parseSnowflakeDec(id)`
-  — parse a known format.
+  — parse a known format. `parseSnowflakeBase32` throws unless the ID has
+  exactly 13 characters and encodes a value that fits in 64 bits.
 - `extractTime(id, epoch?)` — absolute timestamp (ms since the Unix epoch).
 - `snowflakeToHex(decimal)`, `snowflakeToDecimal(hex)` — convert between the
   legacy formats.
 - `crockfordEncode(value: bigint, length)`, `crockfordDecode(str): bigint`.
+  `crockfordEncode` throws `RangeError` for a negative value or one that does
+  not fit in `length` characters (`5 * length` bits); `crockfordDecode` throws
+  on an empty string or an invalid character.
 - `sha1Uuid(content: string): Promise<string>`,
-  `sha1Bytes(data: Uint8Array): Promise<string>`.
+  `sha1Bytes(data: Uint8Array): Promise<string>` (any `Uint8Array`, including
+  a Node `Buffer` or a view into a shared buffer; only the view's bytes are
+  hashed).
 
 Note that `parseSnowflake` returns `timestamp` relative to the epoch; use
 `extractTime` to get an absolute time.
@@ -134,8 +144,21 @@ parseSnowflake("1J9X4Z2P3K7M5");        // Crockford base32
   `2021-01-01T00:00:00Z`).
 - 10-bit worker ID supports 1024 distinct generators (process / machine).
 - 12-bit sequence — up to 4096 IDs per worker per millisecond. On overflow,
-  the generator busy-waits for the next millisecond rather than corrupting
-  ordering.
+  the generator moves on to the next millisecond without waiting for the
+  clock, so the embedded timestamp can run ahead of the wall clock by a few
+  milliseconds under sustained load.
+
+### Monotonicity and clock steps
+
+IDs from one `SnowflakeId` instance are strictly increasing and never repeat,
+whatever the clock does. When `now()` returns a time earlier than the last
+timestamp issued (an NTP step back, a VM resume), the generator keeps
+issuing at the last timestamp and increments the sequence; it resumes
+following the clock once the clock passes that timestamp. A frozen clock
+(for example an injected `now` in tests) therefore never blocks
+`generate()`: after 4096 IDs it advances the timestamp by one millisecond.
+The embedded timestamp, and so `extractTime`, may be ahead of the real
+creation time after a clock step back or a burst.
 
 ### Why Crockford base32 instead of hex or base64?
 

@@ -29,11 +29,19 @@ DECODE_MAP.set("l", 1);
 /**
  * Encode a BigInt value as a Crockford base32 string, zero-padded to `length` characters.
  *
- * @param value Non-negative BigInt to encode
- * @param length Output string length (zero-padded on the left)
+ * @param value Non-negative BigInt to encode, below `2 ** (5 * length)`
+ * @param length Output string length (zero-padded on the left), a non-negative integer
  * @returns Crockford base32 string of exactly `length` characters
+ * @throws RangeError if `length` is not a non-negative integer, or `value` is negative or
+ *   does not fit in `length` characters
  */
 export function crockfordEncode(value: bigint, length: number): string {
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new RangeError(`Crockford base32 length must be a non-negative integer, got ${length}`);
+  }
+  if (value < 0n || value >> BigInt(5 * length) !== 0n) {
+    throw new RangeError(`Value ${value} does not fit in ${length} Crockford base32 characters`);
+  }
   let result = "";
   let v = value;
   for (let i = 0; i < length; i++) {
@@ -47,11 +55,14 @@ export function crockfordEncode(value: bigint, length: number): string {
  * Decode a Crockford base32 string to a BigInt value.
  * Case-insensitive. Accepts visual substitutions (O→0, I/L→1).
  *
- * @param str Crockford base32 string
+ * @param str Non-empty Crockford base32 string
  * @returns Decoded BigInt value
- * @throws Error if string contains invalid characters
+ * @throws Error if the string is empty or contains invalid characters
  */
 export function crockfordDecode(str: string): bigint {
+  if (str.length === 0) {
+    throw new Error("Cannot decode an empty Crockford base32 string");
+  }
   let result = 0n;
   for (let i = 0; i < str.length; i++) {
     const ch = str.charAt(i);
