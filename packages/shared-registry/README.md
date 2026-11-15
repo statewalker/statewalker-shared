@@ -4,7 +4,9 @@
 
 `newRegistry()` returns a `[register, cleanup]` pair: `register(fn?)` adds a
 listener and returns an idempotent disposer; `cleanup()` runs every
-not-yet-disposed listener in **LIFO order** and awaits each one.
+not-yet-disposed listener in **LIFO order** and awaits each one. Awaiting a
+disposer or `cleanup()` means the work is done, even when several callers
+ask at once.
 
 It is a disposer registry — not a key/value lookup. Despite the name,
 this package contains no symbol lookup tables.
@@ -54,9 +56,11 @@ types). No runtime dependencies; works in browsers, Node and workers.
 - `newRegistry<E = unknown>(onError = console.error)` returns
   `[register, cleanup]`.
   - `register(callback?): () => Promise<void>` — adds a callback and returns
-    its disposer. The disposer runs the callback at most once.
+    its disposer. The disposer runs the callback at most once; every call
+    returns the same promise, which settles when the callback has finished.
   - `cleanup(): Promise<void>` — runs all remaining callbacks, newest first,
-    one after another.
+    one after another, including callbacks registered while it runs. A call
+    made while a cleanup is in flight returns that cleanup's promise.
 
 ## Examples
 
@@ -90,23 +94,45 @@ await cleanup(); // tears down every per-request listener registered above
 
 ### LIFO order
 
-Registrations are keyed by a monotonic counter; `cleanup` reads
-`Object.values(...).reverse()` so the **most recently registered** callback
-runs first. This matches typical resource-acquisition ordering: outer
-resources are acquired first and released last.
+Registrations live in an insertion-ordered map; `cleanup` repeatedly takes
+the **most recently registered** remaining callback, awaits it, and moves on
+until the map is empty. This matches typical resource-acquisition ordering:
+outer resources are acquired first and released last. A callback registered
+while `cleanup` runs is newer than everything left, so it runs next. (A
+callback that registers a new callback every time it runs would therefore
+keep `cleanup` going forever.)
 
-### Idempotent disposers
+### Idempotent disposers and concurrent calls
 
-Each disposer guards on its own registration id. Calling the same disposer
-twice — or calling it after `cleanup` has already swept it — runs the
-listener at most once.
+Each disposer memoises the promise of its single run. Calling the same
+disposer twice, calling it while `cleanup` is running it, or calling it after
+`cleanup` has already swept it runs the listener at most once, and every
+call resolves only when that run has finished. A registration stays in the
+registry until its listener has finished, so `cleanup` waits for a disposer
+already in flight before it runs older listeners.
+
+`cleanup` memoises its in-flight promise too: a second `cleanup()` (say a
+second `SIGTERM`) returns the same promise instead of starting a parallel
+sweep, so the serial LIFO order holds and `await cleanup()` means done. Once a
+cleanup has finished, a later `cleanup()` starts a new sweep of whatever has
+been registered since.
+
+Do not **await** `cleanup()`, or a listener's own disposer, from inside a
+listener: that promise waits for the listener itself, so the await never
+settles. Calling them without awaiting is fine.
 
 ### Error handling
 
 The default `onError` is `console.error`. Pass a custom handler in
 `newRegistry(onError)` to forward to a logger or aggregator. A throwing
 listener does not abort the rest of `cleanup`; the error is reported and
-the next listener runs.
+the next listener runs. If `onError` itself throws (or returns a rejected
+promise), that failure and the original error go to `console.error`, and
+cleanup still continues; disposers and `cleanup()` never reject.
+
+The `E` in `newRegistry<E>` is not checked at runtime: a listener can throw
+any value, and it is passed to `onError` as is. Keep the default `unknown`
+unless every listener is known to throw `E`.
 
 ### Constraints
 
