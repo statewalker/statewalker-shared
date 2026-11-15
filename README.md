@@ -96,9 +96,11 @@ changelog text for a package yourself.
 - **`pnpm install --frozen-lockfile` fails when `pnpm-lock.yaml` is stale**
   (`ERR_PNPM_OUTDATED_LOCKFILE`). Run `pnpm install` and commit the updated
   lockfile together with the `package.json` change.
-- **`publish-all` bypasses changesets.** It builds and runs
-  `pnpm -r publish` directly, without version bumps or changelogs. Releases
-  go through the changesets flow instead.
+- **Never publish by hand.** There is no local release or publish script:
+  the `publish` job of `ci.yml` publishes, with npm trusted publishing, once
+  the "chore: version packages" pull request is merged. The one exception is
+  a new package's first version, which the maintainer publishes once with 2FA
+  so the trusted publisher can be set up (`.changeset/README.md`).
 
 ## Reference
 
@@ -121,7 +123,7 @@ Each package also has `dev` (`tsdown --watch`), `test:watch`, and `clean`.
 
 | Path | Purpose |
 | --- | --- |
-| `pnpm-workspace.yaml` | workspace globs (`packages/*`, `apps/*`) and the dependency catalog |
+| `pnpm-workspace.yaml` | workspace glob (`packages/*`) and the dependency catalog |
 | `biome.json` | lint and format configuration |
 | `tsconfig.base.json` | base compiler options; not extended by the packages, each `packages/*/tsconfig.json` is self-contained |
 | `turbo.json` | turbo task graph (`build` after dependencies' `build`); the root scripts use `pnpm -r`, which also builds in dependency order |
