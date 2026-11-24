@@ -1,0 +1,54 @@
+{
+  "name": "@statewalker/shared-tasks",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "description": "Durable task queue contract: tasks published under NATS-style subjects, subscriptions with leases, retries, dead letters and reply inboxes, a job log per lease, and a runner that serves a subscription with a Processor. A queue implementation over SQLite (`SqlLike`, the shape of Durable Objects' SqlStorage); no runtime dependencies.",
+  "bugs": {
+    "url": "https://github.com/statewalker/statewalker-shared/issues"
+  },
+  "homepage": "https://github.com/statewalker/statewalker-shared/tree/main/packages/shared-tasks#readme",
+  "author": {
+    "name": "Mikhail Kotelnikov",
+    "email": "mikhail.kotelnikov@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/statewalker/statewalker-shared.git",
+    "directory": "packages/shared-tasks"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "lint": "biome check --write .",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "rimraf": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}
