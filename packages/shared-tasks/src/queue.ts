@@ -8,11 +8,14 @@
 // Taking or acking a task ends its delivery; a task is removed once it had a matching subscription
 // and none still waits for it, or when it expires. Time comes from `now`, so tests move it.
 //
-// New tables only (task_*): rolling back leaves them unused.
+// New tables only (task_*). The layout is versioned in `task_schema`: version 1 is ai-tasks 0.1.0's,
+// and opening a store upgrades it in place (columns added with defaults, no data dropped). A store
+// upgraded by a version cannot be opened by an older one, which refuses a newer schema.
 import { INBOX_PREFIX, isInbox, isPattern, isSubject, subjectMatches } from "./subjects.js";
 import type {
   DeadLetter,
   JobLog,
+  JobOutcome,
   Lease,
   Subscription,
   SubscriptionCounts,
@@ -53,7 +56,12 @@ export interface QueueReader {
   id: string;
   destinations: readonly string[];
   may?: (subject: string) => boolean;
+  /** Whether the reader acts with the host's admin right (`tasks.admin`): cancelling any task. */
+  admin?: boolean;
 }
+
+/** The layout this queue writes; older stores are upgraded when opened. */
+export const SCHEMA_VERSION = 2;
 
 export const DEFAULTS = {
   maxPayloadBytes: 64 * 1024,
@@ -225,6 +233,33 @@ export class TaskQueue {
       job TEXT NOT NULL, at INTEGER NOT NULL, progress TEXT NOT NULL)`);
     sql.exec(`CREATE TABLE IF NOT EXISTS task_changes (project TEXT PRIMARY KEY,
       seq INTEGER NOT NULL)`);
+    this.#upgrade();
+  }
+
+  /**
+   * Brings the layout above (version 1, ai-tasks 0.1.0's) to {@link SCHEMA_VERSION}, once per
+   * store: a store without a `task_schema` row is at version 1, new or not.
+   */
+  #upgrade(): void {
+    const sql = this.#sql;
+    sql.exec("CREATE TABLE IF NOT EXISTS task_schema (version INTEGER NOT NULL)");
+    const row = this.#rows<{ version: number }>("SELECT version FROM task_schema")[0];
+    const version = row ? Number(row.version) : 1;
+    if (version > SCHEMA_VERSION)
+      throw taskError(
+        "EINVAL",
+        `the task store is at schema version ${version}; this queue reads up to ${SCHEMA_VERSION}`,
+      );
+    if (version < 2) {
+      // Version 2: cancelled tasks and deliveries, and how a job ended.
+      sql.exec("ALTER TABLE task_items ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0");
+      sql.exec("ALTER TABLE task_deliveries ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0");
+      sql.exec("ALTER TABLE task_job_entries ADD COLUMN outcome TEXT");
+    }
+    if (version !== SCHEMA_VERSION) {
+      sql.exec("DELETE FROM task_schema");
+      sql.exec("INSERT INTO task_schema (version) VALUES (?)", SCHEMA_VERSION);
+    }
   }
 
   #rows<T>(query: string, ...bindings: unknown[]): T[] {
@@ -388,7 +423,7 @@ export class TaskQueue {
   listTasks(project: string, options: { limit?: number } = {}): Task[] {
     this.sweep(project);
     return this.#rows<TaskRow>(
-      "SELECT * FROM task_items WHERE project = ? ORDER BY seq LIMIT ?",
+      "SELECT * FROM task_items WHERE project = ? AND cancelled = 0 ORDER BY seq LIMIT ?",
       project,
       limitOf(options.limit, 1000),
     ).map(taskOf);
@@ -489,7 +524,7 @@ export class TaskQueue {
     if (!s.inbox) {
       let found = false;
       for (const task of this.#rows<TaskRow>(
-        "SELECT * FROM task_items WHERE project = ? ORDER BY seq",
+        "SELECT * FROM task_items WHERE project = ? AND cancelled = 0 ORDER BY seq",
         project,
       ))
         if (matches(sub, task)) {
@@ -541,6 +576,11 @@ export class TaskQueue {
   /** Deletes a subscription: what waited for it is done for it, its dead letters dropped. */
   unsubscribe(project: string, name: string): void {
     if (!this.#sub(project, name)) throw taskError("ENOENT", `no subscription '${name}'`);
+    this.#endLeases(
+      "SELECT lease FROM task_deliveries WHERE project = ? AND subscription = ? AND lease IS NOT NULL",
+      [project, name],
+      "the subscription was removed",
+    );
     this.#sql.exec(
       "DELETE FROM task_deliveries WHERE project = ? AND subscription = ?",
       project,
@@ -699,6 +739,7 @@ export class TaskQueue {
         attempts: number;
         lease_expires: number;
         holder: string;
+        cancelled: number;
       }>("SELECT * FROM task_deliveries WHERE lease = ?", String(id))[0];
     const first = find();
     if (first) this.sweep(first.project);
@@ -716,17 +757,31 @@ export class TaskQueue {
   /** Done: the task is done for the lease's subscription. */
   ack(id: string, holder: string): void {
     const { row } = this.#lease(id, holder);
+    this.#entry(String(id), null, "done");
     this.#sql.exec("DELETE FROM task_deliveries WHERE lease = ?", String(id));
     this.#collect(row.project);
+  }
+
+  /** Ends a cancelled task's lease: no retry, no dead letter. */
+  #endCancelled(id: string, project: string): void {
+    this.#entry(id, null, "cancelled");
+    this.#sql.exec("DELETE FROM task_deliveries WHERE lease = ?", id);
+    this.#collect(project);
+    this.#changed(project);
   }
 
   /** Not done: the task waits again, or goes to the dead letters once its attempts are used up. */
   release(id: string, holder: string, options: { reason?: string } = {}): { dead: boolean } {
     const { row, sub, task } = this.#lease(id, holder);
+    if (row.cancelled) {
+      this.#endCancelled(String(id), row.project);
+      return { dead: false };
+    }
     const reason =
       typeof options.reason === "string" && options.reason
         ? options.reason.slice(0, 1000)
         : "released";
+    this.#entry(String(id), { reason }, "error");
     const dead = Number(row.attempts) >= Number(sub.max_attempts);
     if (dead) this.#bury(sub, task, Number(row.attempts), reason);
     else
@@ -738,13 +793,20 @@ export class TaskQueue {
     return { dead };
   }
 
-  /** Extends a live lease (by the subscription's lease, or `lease_ms`), logging progress. */
+  /**
+   * Extends a live lease (by the subscription's lease, or `lease_ms`), logging progress. A lease
+   * whose task was cancelled ends here instead: ECANCELED.
+   */
   renew(
     id: string,
     holder: string,
     options: { lease_ms?: number; progress?: unknown } = {},
   ): Lease {
     const { row, sub, task } = this.#lease(id, holder);
+    if (row.cancelled) {
+      this.#endCancelled(String(id), row.project);
+      throw taskError("ECANCELED", "the task was cancelled");
+    }
     const now = this.#now();
     const expires = now + leaseOf(options.lease_ms, Number(sub.lease_ms));
     this.#sql.exec(
@@ -756,12 +818,7 @@ export class TaskQueue {
       const progress = JSON.stringify(options.progress);
       if (utf8.encode(progress).length > this.#o.maxPayloadBytes)
         throw taskError("EINVAL", `a progress entry is at most ${this.#o.maxPayloadBytes} bytes`);
-      this.#sql.exec(
-        "INSERT INTO task_job_entries (job, at, progress) VALUES (?, ?, ?)",
-        String(id),
-        now,
-        progress,
-      );
+      this.#entry(String(id), options.progress);
     }
     return {
       id: String(id),
@@ -859,8 +916,110 @@ export class TaskQueue {
     return task;
   }
 
+  /**
+   * Cancels a task, for its sender or an admin. A waiting task is removed; a leased one stays
+   * until its holder's next renew (or release), which ends the lease with ECANCELED: no retry, no
+   * dead letter, and the job's last entry is `cancelled`.
+   */
+  cancel(project: string, taskId: string, by: string, options: { admin?: boolean } = {}): void {
+    this.sweep(project);
+    const task = this.#rows<TaskRow & { cancelled: number }>(
+      "SELECT * FROM task_items WHERE project = ? AND id = ?",
+      project,
+      String(taskId),
+    )[0];
+    if (!task || task.cancelled) throw taskError("ENOENT", "no such task");
+    if (task.sender !== by && !options.admin)
+      throw taskError("EACCES", "only a task's sender or an admin cancels it");
+    this.#sql.exec("DELETE FROM task_deliveries WHERE task = ? AND lease IS NULL", task.seq);
+    const leased = this.#rows<{ n: number }>(
+      "SELECT count(*) AS n FROM task_deliveries WHERE task = ?",
+      task.seq,
+    )[0];
+    if (Number(leased?.n ?? 0) === 0)
+      this.#sql.exec("DELETE FROM task_items WHERE seq = ?", task.seq);
+    else {
+      this.#sql.exec("UPDATE task_items SET cancelled = 1 WHERE seq = ?", task.seq);
+      this.#sql.exec("UPDATE task_deliveries SET cancelled = 1 WHERE task = ?", task.seq);
+    }
+    this.#changed(project);
+  }
+
+  /** Ends the jobs of the leases a query finds, with `error` and `reason`, before they go. */
+  #endLeases(query: string, bindings: unknown[], reason: string): void {
+    for (const { lease } of this.#rows<{ lease: string }>(query, ...bindings))
+      this.#entry(lease, { reason }, "error");
+  }
+
+  readonly #jobWaiters = new Map<string, Set<() => void>>();
+
+  /**
+   * Appends an entry to a job log, stamped strictly after the job's last entry: the time, or the
+   * last stamp plus a thousandth of a millisecond when the clock has not moved past it.
+   */
+  #entry(job: string, progress: unknown, outcome?: JobOutcome): void {
+    const last = this.#rows<{ at: number | null }>(
+      "SELECT max(at) AS at FROM task_job_entries WHERE job = ?",
+      job,
+    )[0]?.at;
+    const now = this.#now();
+    const at =
+      last === null || last === undefined || now > Number(last)
+        ? now
+        : Math.round((Number(last) + 0.001) * 1000) / 1000;
+    this.#sql.exec(
+      "INSERT INTO task_job_entries (job, at, progress, outcome) VALUES (?, ?, ?, ?)",
+      job,
+      at,
+      JSON.stringify(progress ?? null),
+      outcome ?? null,
+    );
+    const waiters = this.#jobWaiters.get(job);
+    if (waiters)
+      queueMicrotask(() => {
+        for (const wake of [...waiters]) wake();
+      });
+  }
+
+  /**
+   * A job log after `after` (a stamp it returned), waiting up to `wait_ms` for an entry when there
+   * is none yet and the job has not ended. In memory: one queue instance's waiters.
+   */
+  async waitJob(
+    project: string,
+    id: string,
+    reader: string,
+    options: { after?: number; wait_ms?: number } = {},
+  ): Promise<JobLog> {
+    const first = this.job(project, id, reader, options);
+    const waitMs = Number(options.wait_ms ?? 0);
+    if (first.entries.length || !(waitMs > 0) || this.#ended(first.id)) return first;
+    await new Promise<void>((resolve) => {
+      const set = this.#jobWaiters.get(first.id) ?? new Set<() => void>();
+      this.#jobWaiters.set(first.id, set);
+      const done = () => {
+        clearTimeout(timer);
+        set.delete(done);
+        if (!set.size) this.#jobWaiters.delete(first.id);
+        resolve();
+      };
+      const timer = setTimeout(done, waitMs);
+      set.add(done);
+    });
+    return this.job(project, id, reader, options);
+  }
+
+  #ended(job: string): boolean {
+    return (
+      this.#rows<{ n: number }>(
+        "SELECT count(*) AS n FROM task_job_entries WHERE job = ? AND outcome IS NOT NULL",
+        job,
+      )[0]?.n !== 0
+    );
+  }
+
   /** A job log, for its lease's holder and its task's sender; ENOENT for anyone else. */
-  job(project: string, id: string, reader: string): JobLog {
+  job(project: string, id: string, reader: string, options: { after?: number } = {}): JobLog {
     this.sweep(project);
     const job = this.#rows<{
       id: string;
@@ -875,10 +1034,15 @@ export class TaskQueue {
       id: job.id,
       task: job.task,
       subscription: job.subscription,
-      entries: this.#rows<{ at: number; progress: string }>(
-        "SELECT at, progress FROM task_job_entries WHERE job = ? ORDER BY seq",
+      entries: this.#rows<{ at: number; progress: string; outcome: JobOutcome | null }>(
+        "SELECT at, progress, outcome FROM task_job_entries WHERE job = ? AND at > ? ORDER BY seq",
         job.id,
-      ).map((e) => ({ at: Number(e.at), progress: JSON.parse(e.progress) })),
+        options.after === undefined ? -1 : Number(options.after),
+      ).map((e) => ({
+        at: Number(e.at),
+        progress: JSON.parse(e.progress),
+        ...(e.outcome ? { outcome: e.outcome } : {}),
+      })),
     };
   }
 
@@ -956,6 +1120,11 @@ export class TaskQueue {
       now,
     );
     for (const task of expired) {
+      this.#endLeases(
+        "SELECT lease FROM task_deliveries WHERE task = ? AND lease IS NOT NULL",
+        [task.seq],
+        "the task expired",
+      );
       for (const d of this.#rows<{ subscription: string }>(
         "SELECT subscription FROM task_deliveries WHERE task = ?",
         task.seq,
@@ -969,12 +1138,25 @@ export class TaskQueue {
       this.#sql.exec("DELETE FROM task_items WHERE seq = ?", task.seq);
     }
     // Leases that ran out: the task waits again, or is dead once its attempts are used up.
-    for (const d of this.#rows<{ subscription: string; task: number; attempts: number }>(
+    for (const d of this.#rows<{
+      subscription: string;
+      task: number;
+      attempts: number;
+      lease: string;
+      cancelled: number;
+    }>(
       "SELECT * FROM task_deliveries WHERE project = ? AND lease IS NOT NULL AND lease_expires <= ?",
       project,
       now,
     )) {
       changed = true;
+      if (d.cancelled) {
+        this.#entry(d.lease, null, "cancelled");
+        this.#sql.exec("DELETE FROM task_deliveries WHERE lease = ?", d.lease);
+        this.#collect(project);
+        continue;
+      }
+      this.#entry(d.lease, { reason: "the lease ran out" }, "error");
       const sub = this.#sub(project, d.subscription) as SubRow;
       const task = this.#rows<TaskRow>("SELECT * FROM task_items WHERE seq = ?", d.task)[0];
       if (task && Number(d.attempts) >= Number(sub.max_attempts))

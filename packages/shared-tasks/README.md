@@ -12,7 +12,14 @@ A durable task queue and its contract:
 - **Leases** hold one task for one processor for a limited time. A lease can be renewed (with a
   progress entry), acked, or released. After `max_attempts` failed leases the task goes to the
   subscription's dead letters.
-- **Job logs** record a lease's progress entries, and a reply refers to its job log.
+- **Job logs** record a lease's progress entries, and a reply refers to its job log. Entries are
+  stamped strictly increasing, so a reader resumes after the last stamp it saw
+  (`job(project, id, { after, wait_ms })` long-polls for the next one). The last entry of an
+  ended job records its `outcome`: `done` (acked), `error` (released, or the lease ran out) or
+  `cancelled`.
+- **Cancelling** (`cancel`, by the task's sender or an admin) removes a waiting task. A leased
+  task ends at its holder's next `renew`, which fails with `ECANCELED`; there is no retry and no
+  dead letter.
 - **`Processor`** (`run(lease, { signal, progress })`) is the work done for a subscription's
   tasks, and **`serveSubscription`** runs one: it claims tasks, keeps their leases renewed, writes
   progress to the job log, replies and acks.
@@ -22,6 +29,11 @@ A durable task queue and its contract:
 
 The contract names no host. A sender, owner or holder is an opaque principal string the host
 stamps (`user:<name>`, `session:<id>`), and rights, limits and transport are the host's.
+
+**Storage.** The layout is versioned (`SCHEMA_VERSION`, recorded in `task_schema`). Opening a
+store upgrades it in place: missing columns are added with defaults, and no data is dropped. Stores
+created by `@statewalker/ai-tasks` 0.1.0 are version 1. A store upgraded by a version cannot be
+opened by an older one, which refuses a newer schema; that is the rollback limit.
 
 ## Why it exists
 
@@ -67,16 +79,20 @@ queue.publish("p1", { subject: "images.uploaded", payload: { key: "a.png" } }, "
 
 - `TaskQueue`: the queue over `SqlLike`, with `publish`, `listTasks`, `subscribe`,
   `listSubscriptions`, `unsubscribe`, `peek`, `take`, `claim`, `ack`, `release`, `renew`,
-  `reply`, `createInbox`, `deadLetters`, `job`, `changeSeq`, `sweep` and `dropProject`. Every
-  call is synchronous.
+  `reply`, `createInbox`, `deadLetters`, `job`, `cancel`, `changeSeq`, `sweep` and
+  `dropProject`; every call is synchronous. `waitChange` and `waitJob` wait for a change or a
+  job-log entry.
 - `TaskQueueOptions`, `DEFAULTS`: clock, id generator and limits (64 KB payloads, 7-day expiry,
   5-minute leases, 3 attempts, dead letters kept 14 days).
 - `queueApi(queue, reader)`: a `TasksApi` over one queue for one reader, in the same process.
-- `serveSubscription(api, options)`: serves one subscription with a `Processor`. Replies carry a
-  `RunnerReply` (`{ job, result?, error? }`).
+- `serveSubscription(api, options)`: serves one subscription with a `Processor`. It ends each
+  lease before replying, so the job log is complete when the reply arrives. Replies carry a
+  `RunnerReply` (`{ job, result?, error?, cancelled? }`). A cancelled task aborts the
+  processor's `signal` at the next renew, and its reply has `cancelled: true`.
 - `subjectMatches`, `isSubject`, `isPattern`, `isInbox`, `INBOX_PREFIX`: subjects and filters.
 - Types: `Task`, `TaskInput`, `Subscription`, `SubscriptionFilter`, `Lease`, `DeadLetter`,
-  `JobEntry`, `JobLog`, `TasksApi`, `Processor`, `ProcessorContext`, `SqlLike`, `QueueReader`.
+  `JobEntry`, `JobOutcome`, `JobLog`, `TasksApi`, `Processor`, `ProcessorContext`, `SqlLike`,
+  `QueueReader` (with `admin` for cancelling any task).
 
 ## Related
 

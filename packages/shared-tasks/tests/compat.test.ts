@@ -1,5 +1,6 @@
-// A store created by @statewalker/ai-tasks 0.1.0 opens as is: shared-tasks keeps its table layout,
-// so hosts that switch packages (statewalker/statewalker-root#406) need no migration.
+// A store created by @statewalker/ai-tasks 0.1.0 opens in shared-tasks: it is upgraded in place
+// (columns added with defaults, the schema version recorded, no data dropped), so hosts that
+// switch packages (statewalker/statewalker-root#406) need no migration of their own.
 //
 // The fixture is an SQL dump of a store that the published ai-tasks 0.1.0 created once (schema and
 // rows): subscription `work` on `jobs.*`, task id1 leased as id3 with one progress entry, and task
@@ -41,14 +42,24 @@ describe("stores created by ai-tasks 0.1.0", () => {
     expect(queue.listTasks(P)).toEqual([]);
   });
 
-  it("are not changed by opening them", () => {
+  it("are upgraded in place once, keeping their data, and take the new operations", () => {
     const store = aiTasksStore();
-    const schema = () =>
+    const clock = { now: () => 1_001_000 };
+    const version = () =>
       store
-        .exec("SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name")
-        .toArray();
-    const before = schema();
-    new TaskQueue(store);
-    expect(schema()).toEqual(before);
+        .exec("SELECT version FROM task_schema")
+        .toArray()
+        .map((r) => Number(r.version));
+    let queue = new TaskQueue(store, clock);
+    expect(version()).toEqual([2]);
+    // Opening again changes nothing.
+    queue = new TaskQueue(store, clock);
+    expect(version()).toEqual([2]);
+    expect(queue.listTasks(P).map((t) => t.id)).toEqual(["id1", "id2"]);
+    // The old lease ends with a final entry, and the waiting task can be cancelled.
+    queue.ack("id3", "user:ann");
+    expect(queue.job(P, "id3", "user:ann").entries.at(-1)).toMatchObject({ outcome: "done" });
+    queue.cancel(P, "id2", "user:ann");
+    expect(queue.listTasks(P)).toEqual([]);
   });
 });

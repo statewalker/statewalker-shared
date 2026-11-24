@@ -100,10 +100,19 @@ export interface DeadLetter {
   expires: number;
 }
 
-/** One progress entry of a job: what a processor reported, as it reported it. */
+/** How a job ended: acked, released (or its lease ran out), or its task was cancelled. */
+export type JobOutcome = "done" | "error" | "cancelled";
+
+/**
+ * One entry of a job log: what a processor reported, as it reported it. `at` is a stamp, strictly
+ * increasing within a job (milliseconds since the epoch, with a fraction when two entries land in
+ * the same millisecond), so a reader resumes after the last stamp it saw. The last entry of an
+ * ended job has its `outcome` (and, for `error`, `progress: { reason }`).
+ */
 export interface JobEntry {
   at: number;
   progress: unknown;
+  outcome?: JobOutcome;
 }
 
 /** The progress log of one lease's work: what a reply references by the lease's id. */
@@ -182,8 +191,16 @@ export interface TasksApi {
   ack(lease: string): Promise<{ acked: true }>;
   release(lease: string, options?: ReleaseOptions): Promise<{ released: true; dead?: true }>;
   renew(lease: string, options?: RenewOptions): Promise<Lease>;
-  /** A job log, for its lease's holder and the task's sender. */
-  job(project: string, id: string): Promise<JobLog>;
+  /**
+   * A job log, for its lease's holder and the task's sender: its entries after `after` (a stamp),
+   * waiting up to `wait_ms` for one when there is none yet and the job has not ended.
+   */
+  job(project: string, id: string, options?: { after?: number; wait_ms?: number }): Promise<JobLog>;
+  /**
+   * Cancels a task, for its sender or `tasks.admin`: a waiting one is removed, a leased one ends
+   * at its holder's next renew (ECANCELED), with no retry.
+   */
+  cancel(project: string, task: string): Promise<{ cancelled: true }>;
 }
 
 /** What a processor is given with its lease. */

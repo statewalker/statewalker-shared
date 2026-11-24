@@ -63,7 +63,9 @@ describe("serveSubscription", () => {
     expect(reply.result).toBe(6);
     expect(replies[0]?.correlation_id).toBe("c1");
     const job = await ann.job(P, reply.job);
-    expect(job.entries.map((e) => e.progress)).toEqual([{ adding: 3 }]);
+    // The lease ended before the reply, so the log already holds its last entry.
+    expect(job.entries.map((e) => e.progress)).toEqual([{ adding: 3 }, null]);
+    expect(job.entries.at(-1)?.outcome).toBe("done");
     // The failing task is released each time, then dead-lettered after 3 attempts.
     for (let i = 0; i < 200; i++) {
       if ((await worker.deadLetters(P, "sums")).dead_letters.length) break;
@@ -75,5 +77,67 @@ describe("serveSubscription", () => {
     stop.abort();
     await served;
     expect(ran.filter((p) => p === "not numbers")).toHaveLength(3);
+  });
+
+  it("treats a processor's own ECANCELED error as a failure, not a cancellation", async () => {
+    const queue = new TaskQueue(sqlite());
+    const ann = queueApi(queue, { id: "user:ann", destinations: ["user:ann"] });
+    const worker = queueApi(queue, { id: "user:worker", destinations: [] });
+    await worker.subscribe(P, { name: "io", filter: { subject: "calls.io" }, max_attempts: 1 });
+    const inbox = await ann.createInbox(P);
+    await ann.publish(P, { subject: "calls.io", reply_to: inbox.name });
+    const processor: Processor = {
+      async run() {
+        throw Object.assign(new Error("ECANCELED: a read was cancelled"), { code: "ECANCELED" });
+      },
+    };
+    const stop = new AbortController();
+    const served = serveSubscription(worker, {
+      project: P,
+      subscription: "io",
+      processor,
+      signal: stop.signal,
+      waitMs: 20,
+    });
+    let replies: Awaited<ReturnType<typeof ann.take>>["tasks"] = [];
+    for (let i = 0; i < 200 && !replies.length; i++) {
+      replies = (await ann.take(P, inbox.name)).tasks;
+      if (!replies.length) await new Promise((r) => setTimeout(r, 5));
+    }
+    stop.abort();
+    await served;
+    const reply = replies[0]?.payload as { cancelled?: true; error?: string };
+    expect(reply.cancelled).toBeUndefined();
+    expect(reply.error).toMatch(/a read was cancelled/);
+    expect((await worker.deadLetters(P, "io")).dead_letters).toHaveLength(1);
+  });
+
+  it("still replies with the result when the ack fails", async () => {
+    const queue = new TaskQueue(sqlite());
+    const ann = queueApi(queue, { id: "user:ann", destinations: ["user:ann"] });
+    const real = queueApi(queue, { id: "user:worker", destinations: [] });
+    const worker = { ...real, ack: async () => Promise.reject(new Error("the network fell over")) };
+    await real.subscribe(P, { name: "sums", filter: { subject: "calls.sum" } });
+    const inbox = await ann.createInbox(P);
+    await ann.publish(P, { subject: "calls.sum", payload: [1, 2], reply_to: inbox.name });
+    const errors: unknown[] = [];
+    const stop = new AbortController();
+    const served = serveSubscription(worker, {
+      project: P,
+      subscription: "sums",
+      processor: { run: async (lease) => (lease.task.payload as number[]).reduce((a, b) => a + b) },
+      signal: stop.signal,
+      waitMs: 20,
+      onError: (e) => errors.push(e),
+    });
+    let replies: Awaited<ReturnType<typeof ann.take>>["tasks"] = [];
+    for (let i = 0; i < 200 && !replies.length; i++) {
+      replies = (await ann.take(P, inbox.name)).tasks;
+      if (!replies.length) await new Promise((r) => setTimeout(r, 5));
+    }
+    stop.abort();
+    await served;
+    expect(replies[0]?.payload).toMatchObject({ result: 3 });
+    expect(errors).toContainEqual(expect.objectContaining({ message: "the network fell over" }));
   });
 });
