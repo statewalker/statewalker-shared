@@ -176,6 +176,19 @@ that listener), and the caller's promise resolves with the validated value.
 A validator that throws instead of returning issues is reported the same way,
 with the thrown error as `error.cause`.
 
+**Cancellation.** `commands.call(decl, payload, { signal })` takes an optional
+`AbortSignal`. Listeners read it as `cmd.signal` and should stop their work
+when it aborts. If it aborts before the command settles, the call rejects with
+`CommandError("aborted")`, whose `cause` is the signal's `reason`, and later
+`resolve` / `reject` calls are ignored. An already-aborted signal rejects
+before any listener runs. A call without a signal has no `cmd.signal`.
+
+```ts
+const controller = new AbortController();
+const call = commands.call(PickFileCommand, { multiple: true }, { signal: controller.signal });
+controller.abort(); // call.promise rejects with kind "aborted"
+```
+
 ### Registries
 
 ```ts

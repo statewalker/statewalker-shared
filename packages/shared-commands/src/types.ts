@@ -18,6 +18,12 @@ export interface Command<P, R> {
   readonly key: string;
   readonly payload: P;
   /**
+   * The caller's cancellation signal, when the call was given one. A listener
+   * that works asynchronously should stop when it aborts; the bus already
+   * rejects the command with a `CommandError` of kind `"aborted"`.
+   */
+  readonly signal?: AbortSignal;
+  /**
    * True once the command is decided: `resolve` or `reject` was called (by a
    * listener, a listener's promise, the policy or the caller). Later calls
    * no-op. Read-only.
@@ -70,6 +76,17 @@ export interface CommandDeclaration<P, R> {
   readonly icon?: string;
 }
 
+/** Options of one `Commands.call`. */
+export interface CallOptions {
+  /**
+   * Cancels the call: when it aborts before the command settles, the command
+   * rejects with a `CommandError` of kind `"aborted"` (its `cause` is the
+   * signal's `reason`) and later `resolve` / `reject` calls are ignored. An
+   * already-aborted signal rejects before any listener runs.
+   */
+  readonly signal?: AbortSignal;
+}
+
 interface ListenerRecord {
   readonly fn: CommandListener<unknown, unknown>;
   readonly priority: number;
@@ -100,12 +117,17 @@ export class Commands {
   declare init?: () => void | Promise<void>;
   declare close?: () => void | Promise<void>;
 
-  call<P, R>(decl: CommandDeclaration<P, R>, payload: P): Command<P, R> {
-    return dispatchCommand(decl, payload, () => {
-      const list = this._listeners.get(decl.key);
-      const snapshot = list ? [...list] : [];
-      return snapshot.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
-    });
+  call<P, R>(decl: CommandDeclaration<P, R>, payload: P, options?: CallOptions): Command<P, R> {
+    return dispatchCommand(
+      decl,
+      payload,
+      () => {
+        const list = this._listeners.get(decl.key);
+        const snapshot = list ? [...list] : [];
+        return snapshot.sort((a, b) => b.priority - a.priority || a.seq - b.seq);
+      },
+      options?.signal,
+    );
   }
 
   listen<P, R>(
