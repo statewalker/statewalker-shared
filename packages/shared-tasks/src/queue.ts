@@ -576,6 +576,11 @@ export class TaskQueue {
   /** Deletes a subscription: what waited for it is done for it, its dead letters dropped. */
   unsubscribe(project: string, name: string): void {
     if (!this.#sub(project, name)) throw taskError("ENOENT", `no subscription '${name}'`);
+    this.#endLeases(
+      "SELECT lease FROM task_deliveries WHERE project = ? AND subscription = ? AND lease IS NOT NULL",
+      [project, name],
+      "the subscription was removed",
+    );
     this.#sql.exec(
       "DELETE FROM task_deliveries WHERE project = ? AND subscription = ?",
       project,
@@ -940,6 +945,12 @@ export class TaskQueue {
     this.#changed(project);
   }
 
+  /** Ends the jobs of the leases a query finds, with `error` and `reason`, before they go. */
+  #endLeases(query: string, bindings: unknown[], reason: string): void {
+    for (const { lease } of this.#rows<{ lease: string }>(query, ...bindings))
+      this.#entry(lease, { reason }, "error");
+  }
+
   readonly #jobWaiters = new Map<string, Set<() => void>>();
 
   /**
@@ -1109,6 +1120,11 @@ export class TaskQueue {
       now,
     );
     for (const task of expired) {
+      this.#endLeases(
+        "SELECT lease FROM task_deliveries WHERE task = ? AND lease IS NOT NULL",
+        [task.seq],
+        "the task expired",
+      );
       for (const d of this.#rows<{ subscription: string }>(
         "SELECT subscription FROM task_deliveries WHERE task = ?",
         task.seq,

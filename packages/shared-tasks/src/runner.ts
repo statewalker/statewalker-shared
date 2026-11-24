@@ -78,12 +78,14 @@ export async function serveSubscription(api: RunnerApi, options: ServeOptions): 
         },
       });
       if (work.signal.aborted) throw work.signal.reason ?? new Error("aborted");
-      // The lease ends first, so the job log holds its last entry when the reply arrives.
-      await api.ack(lease.id);
+      // The lease ends first, so the job log holds its last entry when the reply arrives. A failed
+      // ack does not turn the result into an error: the caller still gets it.
+      await api.ack(lease.id).catch(onError);
       await reply({ job: lease.id, ...(result !== undefined ? { result } : {}) });
     } catch (e) {
-      // A cancelled task's lease already ended at the renew that said so: no retry.
-      if (isCancelled(e) || isCancelled(work.signal.reason)) {
+      // A cancelled task's lease already ended at the renew that said so: no retry. Only the
+      // queue's answer counts, never a processor's own error that happens to say ECANCELED.
+      if (isCancelled(work.signal.reason)) {
         await reply({ job: lease.id, error: messageOf(work.signal.reason ?? e), cancelled: true });
         return;
       }

@@ -110,6 +110,26 @@ describe("job log", () => {
     });
   });
 
+  it("ends a leased job whose task expired, or whose subscription was removed, with `error`", () => {
+    const { queue, advance } = setup();
+    queue.publish(P, { subject: "jobs.x", expires_in_ms: 60_000 }, "user:bob");
+    const [expiring] = queue.claim(P, "work", ann, { lease_ms: 600_000 });
+    queue.renew(String(expiring?.id), "user:ann", { progress: 1 });
+    advance(120_000);
+    queue.sweep(P);
+    expect(queue.job(P, String(expiring?.id), "user:ann").entries.at(-1)).toMatchObject({
+      outcome: "error",
+      progress: { reason: "the task expired" },
+    });
+    queue.publish(P, { subject: "jobs.y" }, "user:bob");
+    const [orphaned] = queue.claim(P, "work", ann);
+    queue.unsubscribe(P, "work");
+    expect(queue.job(P, String(orphaned?.id), "user:ann").entries.at(-1)).toMatchObject({
+      outcome: "error",
+      progress: { reason: "the subscription was removed" },
+    });
+  });
+
   it("refuses progress after the job has ended", () => {
     const { queue, lease } = setup();
     const { id } = lease();
