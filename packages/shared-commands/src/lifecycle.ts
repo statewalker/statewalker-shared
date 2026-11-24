@@ -59,13 +59,14 @@ function validate<T>(
  * declaration's policy, and
  * settle through output validation. Every settlement route (a listener's
  * direct `resolve` / `reject`, its returned promise, its throw, the
- * caller's `resolve` / `reject` after a `true` claim) goes through the one
- * state machine below.
+ * caller's `resolve` / `reject` after a `true` claim, the caller's `signal`)
+ * goes through the one state machine below.
  */
 export function dispatchCommand<P, R>(
   decl: CommandDeclaration<P, R>,
   payload: P,
   listeners: () => readonly DispatchListener[],
+  signal?: AbortSignal,
 ): Command<P, R> {
   let state: State = "pending";
   let observed = false;
@@ -80,8 +81,14 @@ export function dispatchCommand<P, R>(
 
   const decided = () => state === "validating" || state === "settled";
 
-  const fail = (error: unknown) => {
+  let onAbort: (() => void) | undefined;
+  const settle = () => {
     state = "settled";
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  };
+
+  const fail = (error: unknown) => {
+    settle();
     rejectPromise(error);
   };
 
@@ -106,7 +113,7 @@ export function dispatchCommand<P, R>(
       value,
       (result) => {
         if (result.issues) return outputError(result.issues);
-        state = "settled";
+        settle();
         resolvePromise(result.value);
       },
       outputError,
@@ -120,6 +127,8 @@ export function dispatchCommand<P, R>(
     Object.defineProperties({} as Command<P, R>, {
       key: { value: decl.key, enumerable: true },
       payload: { get: () => currentPayload, enumerable: true },
+      // Only when the caller gave one, so a call without options keeps its shape.
+      ...(signal ? { signal: { value: signal, enumerable: true } } : {}),
       settled: { get: decided, enumerable: true },
       resolve: { value: (value: R) => resolve(value), enumerable: true },
       reject: { value: reject, enumerable: true },
@@ -165,6 +174,17 @@ export function dispatchCommand<P, R>(
       fail(new CommandError("not-claimed", { commandKey: decl.key }));
     }
   };
+
+  if (signal) {
+    const aborted = () =>
+      reject(new CommandError("aborted", { commandKey: decl.key, cause: signal.reason }));
+    if (signal.aborted) {
+      aborted();
+      return command;
+    }
+    onAbort = aborted;
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
 
   const inputError = (cause: unknown) =>
     reject(new CommandError("input-validation", { commandKey: decl.key, cause }));

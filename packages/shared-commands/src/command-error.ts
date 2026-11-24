@@ -5,7 +5,8 @@ export type CommandErrorKind =
   | "no-handlers"
   | "not-claimed"
   | "listener-threw"
-  | "output-validation";
+  | "output-validation"
+  | "aborted";
 
 export interface CommandErrorOptions {
   readonly commandKey: string;
@@ -23,6 +24,7 @@ export interface CommandErrorOptions {
  * - `"not-claimed"` — policy `required` rejected because every listener returned `void`.
  * - `"listener-threw"` — a listener threw or returned a rejecting promise. `cause` is the thrown value / rejection reason; `listener` is the offending function.
  * - `"output-validation"` — a listener resolved with a value that failed `decl.outputSchema`. `cause` is the validator's failure; `listener` is the offending function.
+ * - `"aborted"` — the caller's `signal` aborted before the command settled. `cause` is the signal's `reason`.
  *
  * Pending-forever (silent policy with no claimer) is NOT a `CommandError`.
  */

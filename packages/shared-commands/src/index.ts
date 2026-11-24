@@ -4,5 +4,5 @@ export { CommandError, type CommandErrorKind, type CommandErrorOptions } from ".
 export { passthrough } from "./passthrough.js";
 export { ASYNC, type DispatchPolicy, REQUIRED, SILENT } from "./policy.js";
 export { CommandsRegistry, type MutableCommandsRegistry } from "./registry.js";
-export type { CommandDeclaration, CommandListener } from "./types.js";
+export type { CallOptions, CommandDeclaration, CommandListener } from "./types.js";
 export { Commands } from "./types.js";
