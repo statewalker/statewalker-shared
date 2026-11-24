@@ -1,6 +1,6 @@
 {
   "name": "@statewalker/shared-tasks",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
   "description": "Durable task queue contract: tasks published under NATS-style subjects, subscriptions with leases, retries, dead letters and reply inboxes, a job log per lease, and a runner that serves a subscription with a Processor. A queue implementation over SQLite (`SqlLike`, the shape of Durable Objects' SqlStorage); no runtime dependencies.",
