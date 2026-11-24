@@ -63,7 +63,9 @@ describe("serveSubscription", () => {
     expect(reply.result).toBe(6);
     expect(replies[0]?.correlation_id).toBe("c1");
     const job = await ann.job(P, reply.job);
-    expect(job.entries.map((e) => e.progress)).toEqual([{ adding: 3 }]);
+    // The lease ended before the reply, so the log already holds its last entry.
+    expect(job.entries.map((e) => e.progress)).toEqual([{ adding: 3 }, null]);
+    expect(job.entries.at(-1)?.outcome).toBe("done");
     // The failing task is released each time, then dead-lettered after 3 attempts.
     for (let i = 0; i < 200; i++) {
       if ((await worker.deadLetters(P, "sums")).dead_letters.length) break;

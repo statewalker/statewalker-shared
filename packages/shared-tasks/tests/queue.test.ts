@@ -217,7 +217,8 @@ describe("task queue", () => {
     // The job log: the holder and the sender read it.
     expect(queue.job(P, String(lease?.id), "user:ann")).toMatchObject({
       task: call.id,
-      entries: [{ progress: { step: "adding" } }],
+      // The ack ended the job: its last entry says so (statewalker/statewalker-root#404).
+      entries: [{ progress: { step: "adding" } }, { progress: null, outcome: "done" }],
     });
     expect(() => queue.job(P, String(lease?.id), "user:eve")).toThrow(/^ENOENT/);
   });

@@ -26,9 +26,12 @@ export interface RunnerReply {
   job: string;
   result?: unknown;
   error?: string;
+  /** Set when the task was cancelled while it ran. */
+  cancelled?: true;
 }
 
 const messageOf = (e: unknown) => String((e as Error)?.message ?? e);
+const isCancelled = (e: unknown) => (e as { code?: unknown } | undefined)?.code === "ECANCELED";
 
 type RunnerApi = Pick<TasksApi, "claim" | "renew" | "ack" | "release" | "reply" | "changes">;
 
@@ -63,19 +66,30 @@ export async function serveSubscription(api: RunnerApi, options: ServeOptions): 
       const result = await processor.run(lease, {
         signal: work.signal,
         progress: async (entry) => {
-          await api.renew(lease.id, {
-            progress: entry,
-            ...(options.leaseMs ? { lease_ms: options.leaseMs } : {}),
-          });
+          try {
+            await api.renew(lease.id, {
+              progress: entry,
+              ...(options.leaseMs ? { lease_ms: options.leaseMs } : {}),
+            });
+          } catch (e) {
+            if (isCancelled(e)) work.abort(e);
+            throw e;
+          }
         },
       });
       if (work.signal.aborted) throw work.signal.reason ?? new Error("aborted");
-      await reply({ job: lease.id, ...(result !== undefined ? { result } : {}) });
+      // The lease ends first, so the job log holds its last entry when the reply arrives.
       await api.ack(lease.id);
+      await reply({ job: lease.id, ...(result !== undefined ? { result } : {}) });
     } catch (e) {
+      // A cancelled task's lease already ended at the renew that said so: no retry.
+      if (isCancelled(e) || isCancelled(work.signal.reason)) {
+        await reply({ job: lease.id, error: messageOf(work.signal.reason ?? e), cancelled: true });
+        return;
+      }
+      await api.release(lease.id, { reason: messageOf(e) }).catch(onError);
       // The last attempt answers the caller with the error, so no one waits for a dead letter.
       if (lease.attempt >= lease.max_attempts) await reply({ job: lease.id, error: messageOf(e) });
-      await api.release(lease.id, { reason: messageOf(e) }).catch(onError);
     } finally {
       clearInterval(timer);
       signal.removeEventListener("abort", stop);

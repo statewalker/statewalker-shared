@@ -46,6 +46,14 @@ export function queueApi(queue: TaskQueue, reader: QueueReader): TasksApi {
         return { released: true as const, ...(dead ? { dead: true as const } : {}) };
       }),
     renew: (lease, options) => run(() => queue.renew(lease, reader.id, options)),
-    job: (project, id) => run(() => queue.job(project, id, reader.id)),
+    job: (project, id, options = {}) => {
+      const wait = Math.min(Math.max(Number(options.wait_ms ?? 0), 0), MAX_WAIT_MS);
+      return queue.waitJob(project, id, reader.id, { after: options.after, wait_ms: wait });
+    },
+    cancel: (project, task) =>
+      run(() => {
+        queue.cancel(project, task, reader.id, { admin: reader.admin === true });
+        return { cancelled: true as const };
+      }),
   };
 }
