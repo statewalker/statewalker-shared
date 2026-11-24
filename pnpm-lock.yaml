@@ -18,9 +18,6 @@ catalogs:
     '@standard-schema/spec':
       specifier: ^1.1.0
       version: 1.1.0
-    '@statewalker/ai-tasks':
-      specifier: 0.1.0
-      version: 0.1.0
     '@types/node':
       specifier: ^26.6.4
       version: 26.6.4
@@ -262,9 +259,6 @@ importers:
 
   packages/shared-tasks:
     devDependencies:
-      '@statewalker/ai-tasks':
-        specifier: 'catalog:'
-        version: 0.1.0
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.4
@@ -722,10 +716,6 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
-
-  '@statewalker/ai-tasks@0.1.0':
-    resolution: {integrity: sha512-B+n30zOsz36VZmJSuT4GJI9Lkwg6XL03zmO+HVtXDknmq6X6iXOw7xD7zpMK1MBJ91VypPXjMcTiEnPgl5tPCg==}
-    engines: {node: '>=22.13'}
 
   '@turbo/darwin-64@2.11.7':
     resolution: {integrity: sha512-Z2LFOxwbiJueD1miByXJS/BrW21vv6YaQXZustty5jEX4vQYw6zyh101Sz1QO7WG0mqBzKagZ/DoAeeujI0/Sw==}
@@ -1929,8 +1919,6 @@ snapshots:
       zod: 4.6.5
 
   '@standard-schema/spec@1.1.0': {}
-
-  '@statewalker/ai-tasks@0.1.0': {}
 
   '@turbo/darwin-64@2.11.7':
     optional: true

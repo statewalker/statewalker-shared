@@ -2,8 +2,6 @@ packages:
   - "packages/*"
 
 catalog:
-  # Only for shared-tasks' compat test: a store created by the last ai-tasks release.
-  "@statewalker/ai-tasks": 0.1.0
   "@changesets/cli": "^3.0.3"
   "@biomejs/biome": ^2.5.15
   "@standard-community/standard-json": ^0.4.0

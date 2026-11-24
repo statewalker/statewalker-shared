@@ -41,7 +41,6 @@
     "format": "biome format --write ."
   },
   "devDependencies": {
-    "@statewalker/ai-tasks": "catalog:",
     "@types/node": "catalog:",
     "rimraf": "catalog:",
     "tsdown": "catalog:",
